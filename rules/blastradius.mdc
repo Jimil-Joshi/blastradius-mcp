@@ -1,0 +1,11 @@
+---
+description: Zero-Trust AI Security and Pre-Execution Blast Radius Simulation Guardrails
+globs: *
+---
+
+# BlastRadius Security Guardrails
+
+When working with terminal commands, database queries, or cloud infrastructure operations:
+- Always run pre-execution simulation using the `blastradius` MCP server (`simulate_action`) to verify danger score and blast radius.
+- Sanitize sensitive tokens, credentials, and PII with `inspect_payload_dlp`.
+- Never execute destructive commands without policy evaluation (`enforce_policy`).

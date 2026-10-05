@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/open-plugins/schema/main/mcp.schema.json",
+  "mcpServers": {
+    "blastradius": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "blastradius-mcp"
+      ],
+      "description": "Zero-Trust Security, Pre-Execution Blast Radius Simulation, and DLP Redaction Proxy for MCP."
+    }
+  }
+}
