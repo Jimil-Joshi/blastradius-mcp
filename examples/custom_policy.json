@@ -1,0 +1,52 @@
+{
+  "version": "1.0.0",
+  "name": "FinTech Production Guard Policy",
+  "description": "High-security policy enforcing zero production deletion, mandatory approval for cloud mutations, and PII shielding.",
+  "defaultDecision": "ALLOW",
+  "protectedEnvironments": [
+    "prod",
+    "production",
+    "live",
+    "us-east-1-prod"
+  ],
+  "allowedDirectories": [
+    "/app",
+    "C:\\\\workspace"
+  ],
+  "rules": [
+    {
+      "id": "CORP-001",
+      "name": "Block Database Dropping",
+      "description": "Hard block on DROP statements in SQL queries",
+      "enabled": true,
+      "action": "BLOCK",
+      "forbiddenPatterns": [
+        "DROP DATABASE",
+        "DROP TABLE",
+        "TRUNCATE TABLE"
+      ]
+    },
+    {
+      "id": "CORP-002",
+      "name": "Require Confirmation for Cloud Changes",
+      "description": "All AWS EC2 termination and S3 bucket operations require supervisor token",
+      "enabled": true,
+      "action": "REQUIRE_CONFIRMATION",
+      "requireApprovalForDestructive": true
+    },
+    {
+      "id": "CORP-003",
+      "name": "Shield Environment & Key Files",
+      "description": "Prevents any read or write access to private keys and credentials",
+      "enabled": true,
+      "action": "BLOCK",
+      "protectedPaths": [
+        ".env",
+        ".env.production",
+        "id_rsa",
+        "id_ed25519",
+        ".aws/credentials"
+      ]
+    }
+  ]
+}

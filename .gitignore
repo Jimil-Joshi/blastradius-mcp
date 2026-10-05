@@ -1,4 +1,5 @@
 node_modules/
+dist/
 *.log
 blastradius-audit.jsonl
 .DS_Store

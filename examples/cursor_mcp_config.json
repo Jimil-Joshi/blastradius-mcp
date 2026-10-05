@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "blastradius": {
+      "command": "node",
+      "args": [
+        "C:/Users/Jim-per/MCP's/blastradius-mcp/dist/src/index.js"
+      ]
+    }
+  }
+}

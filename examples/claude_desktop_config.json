@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "blastradius-security": {
+      "command": "node",
+      "args": [
+        "C:\\\\Users\\\\Jim-per\\\\MCP's\\\\blastradius-mcp\\\\dist\\\\src\\\\index.js"
+      ],
+      "env": {
+        "BLAST_RADIUS_LICENSE_KEY": "COMMUNITY"
+      }
+    },
+    "guarded-filesystem-proxy": {
+      "command": "node",
+      "args": [
+        "C:\\\\Users\\\\Jim-per\\\\MCP's\\\\blastradius-mcp\\\\dist\\\\src\\\\index.js",
+        "proxy",
+        "--command",
+        "npx -y @modelcontextprotocol/server-filesystem C:\\\\workspace"
+      ]
+    }
+  }
+}

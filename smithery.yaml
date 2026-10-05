@@ -1,0 +1,17 @@
+# Smithery.ai Model Context Protocol Configuration
+# https://smithery.ai/docs/config
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      BLAST_RADIUS_LICENSE_KEY:
+        type: string
+        description: "Optional: Pro or Enterprise license key for advanced policy enforcement and unlimited audit telemetry."
+      BLAST_RADIUS_SIGNING_KEY:
+        type: string
+        description: "Optional: Custom secret for HMAC-SHA256 signature verification."
+  commandLine:
+    command: node
+    args:
+      - ./dist/src/index.js
