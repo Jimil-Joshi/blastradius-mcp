@@ -1,0 +1,10 @@
+{
+  "github.copilot.chat.mcp.servers": {
+    "blastradius-security": {
+      "command": "node",
+      "args": [
+        "C:/Users/Jim-per/MCP's/blastradius-mcp/dist/src/index.js"
+      ]
+    }
+  }
+}

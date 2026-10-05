@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "blastradius-security": {
+      "command": "node",
+      "args": [
+        "C:/Users/Jim-per/MCP's/blastradius-mcp/dist/src/index.js"
+      ],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

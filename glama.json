@@ -1,0 +1,18 @@
+{
+  "$schema": "https://glama.ai/mcp/schemas/server.json",
+  "name": "blastradius-mcp",
+  "displayName": "BlastRadius MCP Security & DLP Proxy",
+  "description": "Zero-trust security proxy, pre-execution blast radius simulation, DLP secret redaction, and cryptographic audit logging for Model Context Protocol.",
+  "maintainers": [
+    "Jimil-Joshi"
+  ],
+  "categories": [
+    "security",
+    "utilities",
+    "developer-tools"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jimil-Joshi/blastradius-mcp"
+  }
+}
