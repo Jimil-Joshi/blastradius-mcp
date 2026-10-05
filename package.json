@@ -1,0 +1,44 @@
+{
+  "name": "blastradius-mcp",
+  "version": "1.0.0",
+  "description": "Enterprise-grade Zero-Trust Security, Blast Radius Simulation, DLP Redaction, and Cryptographic Audit Proxy for Model Context Protocol (MCP)",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "blastradius-mcp": "./dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/src/index.js",
+    "test": "node --test dist/tests/**/*.test.js",
+    "test:src": "npm run build && node --test dist/tests/**/*.test.js"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "ai-security",
+    "zero-trust",
+    "blast-radius",
+    "dlp",
+    "guardrails",
+    "audit-log",
+    "claude",
+    "cursor",
+    "agentic-ai",
+    "proxy",
+    "gateway"
+  ],
+  "author": "BlastRadius Security",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "typescript": "^5.8.2"
+  }
+}
