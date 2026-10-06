@@ -73,3 +73,4 @@ export interface CodeCritiqueResult {
   summary: string;
   analyzedFiles: string[];
 }
+

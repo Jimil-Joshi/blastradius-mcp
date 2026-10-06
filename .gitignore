@@ -7,3 +7,4 @@ blastradius-audit.jsonl
 .env.local
 .readme-transcripts.txt
 *.mcpb
+.blastradius/
