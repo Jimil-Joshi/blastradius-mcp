@@ -189,3 +189,72 @@ export const RequestConfirmationTokenSchema = z.object({
 export const VerifyAuditLogSchema = z.object({
   limit: z.number().min(1).max(1000).default(100).describe('Number of recent audit entries to verify')
 });
+
+// BlastRadius-Zero v2.0 Tool Schemas
+export const RouteToolSchema = z.object({
+  intent: z.string().describe('Intent or target tool to invoke'),
+  candidateServer: z.string().optional().describe('Optional server or namespace hint'),
+  executeImmediately: z.boolean().default(false).describe('Whether to execute if policy allows'),
+  toolArguments: z.record(z.string(), z.any()).optional().describe('Arguments to pass to target tool')
+});
+
+export const VirtualizeContextSchema = z.object({
+  rawContent: z.string().describe('Raw text, logs, or payload to virtualize'),
+  label: z.string().optional().default('payload').describe('Label for reference'),
+  retentionTtlSeconds: z.number().default(3600).describe('TTL in seconds')
+});
+
+export const SimulateSwarmImpactSchema = z.object({
+  targetDiffOrCommand: z.string().describe('Code diff, command, or action to simulate'),
+  contextDescription: z.string().optional().default('').describe('Context description of the change'),
+  agentCount: z.number().min(5).max(50).default(25).describe('Number of adversarial agents'),
+  intensity: z.enum(['FAST', 'DEEP']).default('FAST').describe('Simulation intensity'),
+  focusAreas: z.array(z.enum(['SECURITY', 'CONCURRENCY', 'USABILITY', 'DATA_INTEGRITY'])).optional().describe('Focus areas for simulation')
+});
+
+export const AdversarialPersonaReviewSchema = z.object({
+  targetDiffOrCommand: z.string().describe('Code diff or action to review'),
+  personaType: z.enum(['HACKER', 'CONFUSED_USER', 'LEGACY_SYSTEM', 'CONCURRENCY_RACER', 'ALL']).default('ALL').describe('Adversarial persona type'),
+  depth: z.number().min(1).max(10).default(3).describe('Review depth rounds')
+});
+
+export const BlastRadiusHeatmapSchema = z.object({
+  targetDiffOrCommand: z.string().describe('Code diff or command to generate blast radius heatmap for'),
+  context: z.record(z.string(), z.any()).optional().describe('Execution context'),
+  format: z.enum(['ASCII', 'MARKDOWN', 'JSON']).default('MARKDOWN').describe('Output presentation format')
+});
+
+export const EnforceTddStateSchema = z.object({
+  featureName: z.string().describe('Feature identifier being developed'),
+  action: z.enum(['GET_STATE', 'REGISTER_FAILING_TEST', 'VERIFY_TEST_FAILURE', 'VERIFY_TEST_PASS', 'RESET']).describe('TDD state action'),
+  testFilePath: z.string().optional().describe('Path to the test file'),
+  testOutput: z.string().optional().describe('Output of test execution')
+});
+
+export const GenerateSocraticSpecSchema = z.object({
+  featureRequirement: z.string().describe('Feature requirement or user story'),
+  targetComponents: z.array(z.string()).optional().describe('List of affected components'),
+  depth: z.enum(['HIGH_LEVEL', 'DETAILED', 'EXHAUSTIVE']).default('DETAILED').describe('Spec detail depth')
+});
+
+export const SpawnWorktreeSubagentSchema = z.object({
+  agentId: z.string().describe('Unique agent identifier'),
+  branchName: z.string().describe('Branch name for worktree'),
+  baseBranch: z.string().default('main').describe('Base branch to branch off of')
+});
+
+export const AutomatedCodeCritiqueSchema = z.object({
+  diffOrCode: z.string().describe('Code diff or content to critique'),
+  filePath: z.string().optional().describe('Optional file path hint'),
+  strictSecurity: z.boolean().default(true).describe('Enable strict security heuristic checks')
+});
+
+export const GetSecurityPostureSchema = z.object({
+  includeHistory: z.boolean().default(false).describe('Include historical trend summary')
+});
+
+// Re-export submodule types
+export * from './gateway/types.js';
+export * from './swarm/types.js';
+export * from './quality/types.js';
+
