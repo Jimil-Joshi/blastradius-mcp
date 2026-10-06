@@ -3,6 +3,31 @@ import { DLPScanner } from '../analyzer/dlpScanner.js';
 import { SeverityLevel } from '../types.js';
 import { RegisteredToolSchema, SandboxExecutionResult } from './types.js';
 
+const NON_COMMAND_PROSE_KEYS = new Set([
+  'message',
+  'description',
+  'content',
+  'body',
+  'text',
+  'title',
+  'comment',
+  'notes',
+  'note',
+  'reason',
+  'rationale',
+  'summary',
+  'instruction',
+  'instructions',
+  'prompt',
+  'document',
+  'readme',
+  'changelog',
+  'doc',
+  'docs',
+  'body_text',
+  'summary_text'
+]);
+
 export class SandboxExecutor {
   /**
    * Safely executes an MCP tool within the BlastRadius security sandbox.
@@ -36,33 +61,31 @@ export class SandboxExecutor {
       }
     }
 
-    // 2. Blast Radius & Shell Safety check: evaluate command safety
-    const structuredReport = BlastRadiusEngine.evaluate(serializedArgs);
-    let worstReport = structuredReport;
+    // 2. Blast Radius & Shell Safety check: evaluate command safety via structured JSON
+    // If all parameter fields are purely prose (e.g. commit messages, PR descriptions, comments),
+    // they represent documentation/prose rather than executable commands.
+    const argKeys = Object.keys(args);
+    const isPureProse =
+      argKeys.length > 0 &&
+      argKeys.every((k) => NON_COMMAND_PROSE_KEYS.has(k.toLowerCase()));
 
-    // Additionally evaluate any string leaves directly in case structured leaf is wrapped
-    for (const val of Object.values(args)) {
-      if (typeof val === 'string' && val.trim().length > 0) {
-        const leafReport = BlastRadiusEngine.evaluate(val);
-        if (leafReport.dangerScore > worstReport.dangerScore) {
-          worstReport = leafReport;
-        }
+    if (!isPureProse) {
+      const report = BlastRadiusEngine.evaluate(serializedArgs);
+
+      // If destructive or high risk, halt execution
+      if (
+        report.destructive ||
+        report.dangerScore >= 70 ||
+        report.severity === SeverityLevel.CRITICAL ||
+        report.severity === SeverityLevel.HIGH
+      ) {
+        const reasons = report.reasons.length > 0 ? report.reasons.join('; ') : 'Destructive action detected';
+        return {
+          success: false,
+          securityVerdict: 'BLOCK',
+          reason: `Blast radius violation: ${reasons} (danger score: ${report.dangerScore})`
+        };
       }
-    }
-
-    // If destructive or high risk, halt execution
-    if (
-      worstReport.destructive ||
-      worstReport.dangerScore >= 70 ||
-      worstReport.severity === SeverityLevel.CRITICAL ||
-      worstReport.severity === SeverityLevel.HIGH
-    ) {
-      const reasons = worstReport.reasons.length > 0 ? worstReport.reasons.join('; ') : 'Destructive action detected';
-      return {
-        success: false,
-        securityVerdict: 'BLOCK',
-        reason: `Blast radius violation: ${reasons} (danger score: ${worstReport.dangerScore})`
-      };
     }
 
     // 3. Dispatch safe execution: use registered handler or simulate safe result

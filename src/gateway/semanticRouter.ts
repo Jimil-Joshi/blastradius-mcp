@@ -7,6 +7,25 @@ const STOP_WORDS = new Set([
   'be', 'as', 'are', 'was', 'were', 'our', 'my', 'your', 'their'
 ]);
 
+const KEYWORD_SYNONYMS: Record<string, string[]> = {
+  postgres: ['postgresql', 'pgsql', 'pg'],
+  postgresql: ['postgres', 'pgsql', 'pg'],
+  pgsql: ['postgres', 'postgresql'],
+  k8s: ['kubernetes', 'kube'],
+  kubernetes: ['k8s', 'kube'],
+  kube: ['k8s', 'kubernetes'],
+  git: ['github', 'vcs', 'gitops'],
+  github: ['git', 'vcs'],
+  filesystem: ['file', 'files', 'fs'],
+  file: ['filesystem', 'files', 'fs'],
+  s3: ['aws-s3', 'bucket', 'blob', 'aws'],
+  notification: ['notify', 'alert', 'notice', 'slack'],
+  notify: ['notification', 'alert', 'slack'],
+  commit: ['committed', 'committing'],
+  deploy: ['deployment', 'deploying', 'rollout'],
+  query: ['queries', 'querying', 'select']
+};
+
 export class SemanticRouter {
   private readonly catalog: Map<string, RegisteredToolSchema> = new Map();
   private readonly sandbox: SandboxExecutor;
@@ -168,11 +187,21 @@ export class SemanticRouter {
     }
 
     // 3. Substring match on examples
-    if (tool.examples?.some((ex) => rawIntentLower.includes(ex.toLowerCase()) || ex.toLowerCase().includes(rawIntentLower))) {
+    // Short queries (< 5 chars) do not match partial example substrings with 0.92 confidence
+    // unless query is >= 5 chars and matches on word boundaries
+    if (tool.examples?.some((ex) => {
+      const exLower = ex.toLowerCase().trim();
+      if (rawIntentLower.length >= 5) {
+        if (rawIntentLower.includes(exLower)) return true;
+        const escaped = rawIntentLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return new RegExp(`\\b${escaped}\\b`, 'i').test(exLower);
+      }
+      return false;
+    })) {
       return 0.92;
     }
 
-    // 4. Token overlap calculation
+    // 4. Token overlap calculation with synonym/inflection expansion
     const intentTokens = rawIntentLower
       .split(/[^a-zA-Z0-9_-]+/)
       .map((t) => t.trim())
@@ -192,16 +221,22 @@ export class SemanticRouter {
     let hitCount = 0;
 
     for (const token of intentTokens) {
-      if (toolNameTokens.includes(token)) {
+      const variants = [token, ...(KEYWORD_SYNONYMS[token] || [])];
+      const matchesName = variants.some((v) => toolNameTokens.includes(v));
+      const matchesKeywords = variants.some((v) => keywords.some((k) => k === v || k.includes(v)));
+      const matchesTags = variants.some((v) => tags.includes(v));
+      const matchesDesc = variants.some((v) => descTokens.includes(v));
+
+      if (matchesName) {
         tokenScoreSum += 0.45;
         hitCount++;
-      } else if (keywords.some((k) => k === token || k.includes(token))) {
+      } else if (matchesKeywords) {
         tokenScoreSum += 0.35;
         hitCount++;
-      } else if (tags.includes(token)) {
+      } else if (matchesTags) {
         tokenScoreSum += 0.3;
         hitCount++;
-      } else if (descTokens.includes(token)) {
+      } else if (matchesDesc) {
         tokenScoreSum += 0.15;
         hitCount++;
       }

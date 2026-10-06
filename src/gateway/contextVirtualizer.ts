@@ -1,12 +1,22 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { DLPScanner } from '../analyzer/dlpScanner.js';
 import { VirtualContextHandle, VirtualizeContextParams } from './types.js';
 
 interface StoredContextEntry {
   content: string;
   handle: VirtualContextHandle;
   expiresAtMs: number;
+}
+
+interface ContextMetadata {
+  handleId: string;
+  label: string;
+  createdAt: string;
+  expiresAt: string;
+  expiresAtMs: number;
+  byteSize: number;
 }
 
 export class ContextVirtualizer {
@@ -29,6 +39,13 @@ export class ContextVirtualizer {
   }
 
   /**
+   * Validates handleId to prevent path traversal vulnerabilities.
+   */
+  private isValidHandleId(handleId: string): boolean {
+    return typeof handleId === 'string' && /^ctx_[a-fA-F0-9]{16,64}$/.test(handleId);
+  }
+
+  /**
    * Compresses large context payloads (logs, DB dumps, ASTs, diffs) into
    * lightweight virtual handles with token reduction >85%.
    */
@@ -42,7 +59,10 @@ export class ContextVirtualizer {
 
     const byteSize = Buffer.byteLength(rawContent, 'utf-8');
     const estimatedTokens = Math.max(1, Math.ceil(rawContent.length / 4));
-    const previewSnippet = rawContent.slice(0, 500);
+
+    // Redact any leaked credentials/secrets in preview snippet to avoid echoing secrets
+    const rawSnippet = rawContent.slice(0, 500);
+    const previewSnippet = DLPScanner.scan(rawSnippet, true).sanitizedContent;
 
     // Approximate token footprint of the virtual handle header + preview snippet
     const handleTokens = Math.ceil((handleId.length + label.length + previewSnippet.length + 80) / 4);
@@ -78,11 +98,22 @@ export class ContextVirtualizer {
       expiresAtMs
     });
 
-    // Persist to disk (.blastradius/virtual_context/<handleId>.dat)
+    // Persist to disk (.blastradius/virtual_context/<handleId>.dat and companion .meta.json)
     try {
       this.ensureStorageDir();
       const filePath = path.join(this.storageDir, `${handleId}.dat`);
+      const metaPath = path.join(this.storageDir, `${handleId}.meta.json`);
       fs.writeFileSync(filePath, rawContent, 'utf-8');
+
+      const meta: ContextMetadata = {
+        handleId,
+        label,
+        createdAt,
+        expiresAt,
+        expiresAtMs,
+        byteSize
+      };
+      fs.writeFileSync(metaPath, JSON.stringify(meta), 'utf-8');
     } catch {
       // In-memory fallback
     }
@@ -91,9 +122,13 @@ export class ContextVirtualizer {
   }
 
   /**
-   * Resolves raw payload content by handleId if not expired.
+   * Resolves raw payload content by handleId if not expired and within valid format.
    */
   public resolve(handleId: string): string | null {
+    if (!this.isValidHandleId(handleId)) {
+      return null;
+    }
+
     const entry = this.store.get(handleId);
     if (entry) {
       if (Date.now() > entry.expiresAtMs) {
@@ -104,8 +139,17 @@ export class ContextVirtualizer {
       return entry.content;
     }
 
-    // Attempt retrieval from filesystem
+    // Attempt retrieval from filesystem with metadata expiration check
     try {
+      const metaPath = path.join(this.storageDir, `${handleId}.meta.json`);
+      if (fs.existsSync(metaPath)) {
+        const meta: ContextMetadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+        if (Date.now() > meta.expiresAtMs) {
+          this.removeFile(handleId);
+          return null;
+        }
+      }
+
       const filePath = path.join(this.storageDir, `${handleId}.dat`);
       if (fs.existsSync(filePath)) {
         return fs.readFileSync(filePath, 'utf-8');
@@ -120,20 +164,23 @@ export class ContextVirtualizer {
   /**
    * Greps / filters lines matching a regex pattern or substring from the virtualized content.
    */
-  public query(handleId: string, pattern: string): string[] {
+  public query(handleId: string, pattern: string, limit: number = 100): string[] {
     const content = this.resolve(handleId);
     if (!content) {
       return [];
     }
 
     const lines = content.split(/\r?\n/);
+    let matched: string[];
     try {
       const regex = new RegExp(pattern, 'i');
-      return lines.filter((line) => regex.test(line));
+      matched = lines.filter((line) => regex.test(line));
     } catch {
       const lower = pattern.toLowerCase();
-      return lines.filter((line) => line.toLowerCase().includes(lower));
+      matched = lines.filter((line) => line.toLowerCase().includes(lower));
     }
+
+    return limit > 0 ? matched.slice(0, limit) : matched;
   }
 
   /**
@@ -151,6 +198,43 @@ export class ContextVirtualizer {
       }
     }
 
+    // Scan disk storage for expired companion metadata or orphaned files
+    try {
+      if (fs.existsSync(this.storageDir)) {
+        const files = fs.readdirSync(this.storageDir);
+        for (const file of files) {
+          if (file.endsWith('.meta.json')) {
+            const id = file.replace(/\.meta\.json$/, '');
+            if (this.isValidHandleId(id)) {
+              try {
+                const metaPath = path.join(this.storageDir, file);
+                const meta: ContextMetadata = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                if (now >= meta.expiresAtMs) {
+                  this.removeFile(id);
+                  cleanedCount++;
+                }
+              } catch {
+                this.removeFile(id);
+              }
+            }
+          } else if (file.endsWith('.dat')) {
+            const id = file.replace(/\.dat$/, '');
+            const metaPath = path.join(this.storageDir, `${id}.meta.json`);
+            if (!fs.existsSync(metaPath)) {
+              // Prune orphaned .dat files older than 1 hour
+              try {
+                const stat = fs.statSync(path.join(this.storageDir, file));
+                if (now - stat.mtimeMs > 3600 * 1000) {
+                  this.removeFile(id);
+                  cleanedCount++;
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+    } catch {}
+
     return cleanedCount;
   }
 
@@ -165,10 +249,18 @@ export class ContextVirtualizer {
   }
 
   private removeFile(handleId: string): void {
+    if (!this.isValidHandleId(handleId)) {
+      return;
+    }
+
     try {
-      const filePath = path.join(this.storageDir, `${handleId}.dat`);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+      const dataPath = path.join(this.storageDir, `${handleId}.dat`);
+      const metaPath = path.join(this.storageDir, `${handleId}.meta.json`);
+      if (fs.existsSync(dataPath)) {
+        fs.unlinkSync(dataPath);
+      }
+      if (fs.existsSync(metaPath)) {
+        fs.unlinkSync(metaPath);
       }
     } catch {
       // Ignore unlink errors

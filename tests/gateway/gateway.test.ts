@@ -304,6 +304,83 @@ test('SandboxExecutor - blocks unredacted credentials (AWS key)', async () => {
   assert.ok(leakedKeyResult.reason?.toLowerCase().includes('dlp'));
 });
 
+test('SandboxExecutor - allows prose containing command names without false-positive blocking', async () => {
+  const executor = new SandboxExecutor();
+
+  const tool: RegisteredToolSchema = {
+    name: 'git-commit',
+    description: 'Commit staged changes to git repository',
+    inputSchema: { type: 'object', properties: { message: { type: 'string' } } }
+  };
+
+  const commitWithProse = await executor.execute(tool, {
+    message: 'docs: document caution around running rm -rf / in production scripts'
+  });
+  assert.strictEqual(commitWithProse.success, true);
+  assert.strictEqual(commitWithProse.securityVerdict, 'ALLOW');
+
+  const prWithDescription = await executor.execute({
+    name: 'github-create-pr',
+    description: 'Create PR',
+    inputSchema: { type: 'object', properties: { title: { type: 'string' }, body: { type: 'string' } } }
+  }, {
+    title: 'fix: cleanup temporary cache',
+    body: 'Replaced manual shred /var/data with automated worker lifecycle'
+  });
+  assert.strictEqual(prWithDescription.success, true);
+  assert.strictEqual(prWithDescription.securityVerdict, 'ALLOW');
+});
+
+test('ContextVirtualizer - prevents path traversal on invalid handleIds', () => {
+  const cv = new ContextVirtualizer();
+
+  assert.strictEqual(cv.resolve('../../etc/passwd'), null);
+  assert.strictEqual(cv.resolve('ctx_../../etc/passwd'), null);
+  assert.strictEqual(cv.resolve('../../../windows/win.ini'), null);
+  assert.deepStrictEqual(cv.query('../../etc/passwd', 'root'), []);
+});
+
+test('ContextVirtualizer - masks credentials in previewSnippet with DLP', () => {
+  const cv = new ContextVirtualizer();
+  const rawWithSecret = 'AWS_DEPLOY_CONFIG:\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\nREGION=us-west-2';
+
+  const handle = cv.virtualize({
+    rawContent: rawWithSecret,
+    label: 'aws-config'
+  });
+
+  assert.ok(!handle.previewSnippet?.includes('AKIAIOSFODNN7EXAMPLE'));
+  assert.ok(handle.previewSnippet?.includes('REDACTED_AWS_KEY'));
+  // Full content still resolves accurately
+  assert.strictEqual(cv.resolve(handle.handleId), rawWithSecret);
+});
+
+test('ContextVirtualizer - query supports optional limit parameter', () => {
+  const cv = new ContextVirtualizer();
+  const content = Array.from({ length: 20 }, (_, i) => `item index ${i} found`).join('\n');
+
+  const handle = cv.virtualize({
+    rawContent: content,
+    label: 'items'
+  });
+
+  const fullResults = cv.query(handle.handleId, 'item', 0);
+  assert.strictEqual(fullResults.length, 20);
+
+  const limitedResults = cv.query(handle.handleId, 'item', 5);
+  assert.strictEqual(limitedResults.length, 5);
+});
+
+test('SemanticRouter - inflected keywords match target tools', async () => {
+  const router = new SemanticRouter();
+
+  const resPostgresql = await router.route({ intent: 'query database sessions in postgresql' });
+  assert.strictEqual(resPostgresql.matchedTool, 'postgres-query');
+
+  const resK8s = await router.route({ intent: 'deploy microservice to k8s cluster' });
+  assert.strictEqual(resK8s.matchedTool, 'kubernetes-deploy');
+});
+
 test('Singletons - exported singletons are functional', async () => {
   assert.ok(semanticRouter instanceof SemanticRouter);
   assert.ok(contextVirtualizer instanceof ContextVirtualizer);
@@ -312,3 +389,4 @@ test('Singletons - exported singletons are functional', async () => {
   const tools = semanticRouter.listTools();
   assert.ok(tools.length >= 7);
 });
+
