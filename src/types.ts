@@ -183,8 +183,10 @@ export const RequestConfirmationTokenSchema = z.object({
   toolName: z.string().describe('The name of the tool requesting approval'),
   actionFingerprint: z.string().describe('Hash or identifier of the payload/action to approve'),
   requestedBy: z.string().describe('Agent or user requesting elevated execution'),
-  ttlSeconds: z.number().min(30).max(3600).default(300).describe('Time-to-live for the token in seconds')
+  ttlSeconds: z.number().min(30).max(3600).default(300).describe('Time-to-live for the token in seconds'),
+  reason: z.string().optional().describe('Justification for elevation')
 });
+
 
 export const VerifyAuditLogSchema = z.object({
   limit: z.number().min(1).max(1000).default(100).describe('Number of recent audit entries to verify')

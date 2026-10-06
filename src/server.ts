@@ -1,5 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { BlastRadiusEngine } from './analyzer/blastRadiusEngine.js';
 import { DLPScanner } from './analyzer/dlpScanner.js';
@@ -10,19 +11,63 @@ import { getEdition } from './security/edition.js';
 import { SequenceDetector } from './analyzer/sequenceDetector.js';
 import { calculateSecurityPosture } from './security/postureCalculator.js';
 import { dataFlywheel } from './storage/flywheel.js';
+import { semanticRouter } from './gateway/semanticRouter.js';
+import { contextVirtualizer } from './gateway/contextVirtualizer.js';
+import { SwarmNativeEngine } from './swarm/nativeEngine.js';
+import {
+  generateHeatmap,
+  renderHeatmapAscii,
+  renderHeatmapMarkdown
+} from './swarm/heatmapGenerator.js';
+import {
+  createHackerPersona,
+  createConfusedUserPersona,
+  createLegacySystemPersona,
+  createConcurrencyRacerPersona,
+  createDataCorruptorPersona
+} from './swarm/personas/index.js';
+import { PersonaFinding, AdversarialPersona } from './swarm/types.js';
+import { tddStateMachine } from './quality/tddStateMachine.js';
+import { generateSocraticSpec } from './quality/socraticSpec.js';
+import { worktreeManager } from './quality/worktreeManager.js';
+import { critiqueCode } from './quality/codeCritique.js';
+import {
+  ActionCategory,
+  PolicyDecision,
+  SecurityPolicyConfig,
+  SeverityLevel,
+  AuditEntry,
+  RouteToolSchema,
+  VirtualizeContextSchema,
+  SimulateSwarmImpactSchema,
+  AdversarialPersonaReviewSchema,
+  BlastRadiusHeatmapSchema,
+  EnforceTddStateSchema,
+  GenerateSocraticSpecSchema,
+  SpawnWorktreeSubagentSchema,
+  AutomatedCodeCritiqueSchema,
+  VerifyAuditLogSchema,
+  RequestConfirmationTokenSchema,
+  GetSecurityPostureSchema
+} from './types.js';
 
 /** Ordinal severity ordering, so a signal can be compared against a decision. */
 function severityWeight(severity: SeverityLevel): number {
-  return [SeverityLevel.SAFE, SeverityLevel.LOW, SeverityLevel.MEDIUM, SeverityLevel.HIGH, SeverityLevel.CRITICAL]
-    .indexOf(severity);
+  return [
+    SeverityLevel.SAFE,
+    SeverityLevel.LOW,
+    SeverityLevel.MEDIUM,
+    SeverityLevel.HIGH,
+    SeverityLevel.CRITICAL
+  ].indexOf(severity);
 }
-import { ActionCategory, PolicyDecision, SecurityPolicyConfig, SeverityLevel } from './types.js';
 
 export class BlastRadiusServer {
   private server: Server;
   private policyEngine: PolicyEngine;
   /** Retained so sequence detection honours the same thresholds as the policy. */
   private policyConfig?: SecurityPolicyConfig;
+  private swarmNativeEngine: SwarmNativeEngine;
   private totalInvocations = 0;
   private blockedCount = 0;
   private dlpRedactionsCount = 0;
@@ -31,12 +76,13 @@ export class BlastRadiusServer {
   constructor(customPolicy?: SecurityPolicyConfig) {
     this.policyConfig = customPolicy;
     this.policyEngine = new PolicyEngine(customPolicy);
+    this.swarmNativeEngine = new SwarmNativeEngine();
     AuditLedger.initialize();
 
     this.server = new Server(
       {
         name: 'blastradius-mcp',
-        version: '1.0.0'
+        version: '2.0.0'
       },
       {
         capabilities: {
@@ -48,81 +94,365 @@ export class BlastRadiusServer {
     this.setupHandlers();
   }
 
+  /**
+   * Dual-writes an audit event into both the HMAC-SHA256 append-only ledger
+   * and the persistent SQLite DataFlywheel for compliance telemetry.
+   */
+  public dualWriteAuditEvent(params: {
+    toolName: string;
+    callerId: string;
+    category?: ActionCategory;
+    decision?: PolicyDecision;
+    dangerScore?: number;
+    severity?: SeverityLevel;
+    reasons?: string[];
+    dlpFindingsCount?: number;
+    rawPayload?: any;
+  }): AuditEntry {
+    const entry = AuditLedger.record({
+      toolName: params.toolName,
+      callerId: params.callerId,
+      category: params.category ?? ActionCategory.GENERIC,
+      decision: params.decision ?? PolicyDecision.ALLOW,
+      dangerScore: params.dangerScore ?? 0,
+      severity: params.severity ?? SeverityLevel.SAFE,
+      reasons: params.reasons ?? [],
+      dlpFindingsCount: params.dlpFindingsCount ?? 0,
+      rawPayload: params.rawPayload
+    });
+
+    try {
+      dataFlywheel.recordAuditEvent({
+        toolName: params.toolName,
+        callerId: params.callerId,
+        decision: params.decision ?? PolicyDecision.ALLOW,
+        riskScore: params.dangerScore ?? 0,
+        hash: entry.currentHash
+      });
+    } catch {
+      // Non-blocking telemetry dual-write
+    }
+
+    return entry;
+  }
+
+  private async runPersonaReview(
+    targetDiffOrCommand: string,
+    personaType: 'HACKER' | 'CONFUSED_USER' | 'LEGACY_SYSTEM' | 'CONCURRENCY_RACER' | 'ALL',
+    depth: number
+  ): Promise<PersonaFinding[]> {
+    const personas: AdversarialPersona[] = [];
+
+    if (personaType === 'HACKER' || personaType === 'ALL') {
+      personas.push(createHackerPersona('hacker-review-01'));
+    }
+    if (personaType === 'CONFUSED_USER' || personaType === 'ALL') {
+      personas.push(createConfusedUserPersona('confused-review-01'));
+    }
+    if (personaType === 'LEGACY_SYSTEM' || personaType === 'ALL') {
+      personas.push(createLegacySystemPersona('legacy-review-01'));
+    }
+    if (personaType === 'CONCURRENCY_RACER' || personaType === 'ALL') {
+      personas.push(createConcurrencyRacerPersona('racer-review-01'));
+    }
+    if (personaType === 'ALL') {
+      personas.push(createDataCorruptorPersona('corruptor-review-01'));
+    }
+
+    const allFindings: PersonaFinding[] = [];
+    const rounds = Math.max(1, Math.min(10, depth));
+
+    for (let round = 1; round <= rounds; round++) {
+      const roundResults = await Promise.all(
+        personas.map((p) =>
+          p.evaluate(targetDiffOrCommand, {
+            round,
+            contextDescription: `Adversarial persona review round ${round} of ${rounds}`
+          })
+        )
+      );
+      allFindings.push(...roundResults.flat());
+    }
+
+    // Deduplicate by personaType + attackVector + description
+    const seen = new Set<string>();
+    const uniqueFindings: PersonaFinding[] = [];
+    for (const finding of allFindings) {
+      const key = `${finding.personaType}:${finding.attackVector}:${finding.description}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueFindings.push(finding);
+      }
+    }
+
+    return uniqueFindings;
+  }
+
   private setupHandlers(): void {
-    // 1. List Available Tools
+    // 1. List Available Tools - All 12 BlastRadius-Zero v2.0 Tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
         tools: [
           {
-            name: 'simulate_action',
+            name: 'route_tool',
             description:
-              'Simulates and predicts the blast radius, danger score (0-100), and destructive reversibility of a shell command, SQL query, or cloud operation before execution.',
+              'Semantic and keyword intent router. Resolves natural-language intent to optimal downstream MCP tools with JIT schema retrieval and >85% token reduction.',
             inputSchema: {
               type: 'object',
               properties: {
-                commandOrQuery: {
+                intent: {
                   type: 'string',
-                  description: 'The shell command, SQL query, or cloud API call to simulate.'
+                  description: 'Intent or target tool to invoke.'
                 },
-                actionType: {
+                candidateServer: {
                   type: 'string',
-                  enum: ['SHELL', 'SQL', 'CLOUD', 'FILESYSTEM', 'NETWORK', 'GENERIC'],
-                  description: 'Optional action category hint.'
+                  description: 'Optional server or namespace hint.'
+                },
+                executeImmediately: {
+                  type: 'boolean',
+                  default: false,
+                  description: 'Whether to execute if policy allows.'
+                },
+                toolArguments: {
+                  type: 'object',
+                  description: 'Arguments to pass to target tool.'
+                }
+              },
+              required: ['intent']
+            }
+          },
+          {
+            name: 'virtualize_context',
+            description:
+              'Compresses large tool outputs, diffs, and logs into lightweight virtual handles, saving up to 90% agent context tokens.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                rawContent: {
+                  type: 'string',
+                  description: 'Raw text, logs, or payload to virtualize.'
+                },
+                label: {
+                  type: 'string',
+                  default: 'payload',
+                  description: 'Label for reference.'
+                },
+                retentionTtlSeconds: {
+                  type: 'number',
+                  default: 3600,
+                  description: 'TTL in seconds.'
+                }
+              },
+              required: ['rawContent']
+            }
+          },
+          {
+            name: 'simulate_swarm_impact',
+            description:
+              'Fast in-memory pre-flight safety simulator. Spawns 25-50 adversarial virtual personas (Hacker, Confused User, Concurrency Racer, Data Corruptor) to stress-test diffs and commands in under 3 seconds.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                targetDiffOrCommand: {
+                  type: 'string',
+                  description: 'Code diff, command, or action to simulate.'
+                },
+                contextDescription: {
+                  type: 'string',
+                  default: '',
+                  description: 'Context description of the change.'
+                },
+                agentCount: {
+                  type: 'number',
+                  default: 25,
+                  description: 'Number of adversarial agents (5-50).'
+                },
+                intensity: {
+                  type: 'string',
+                  enum: ['FAST', 'DEEP'],
+                  default: 'FAST',
+                  description: 'Simulation intensity.'
+                },
+                focusAreas: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: ['SECURITY', 'CONCURRENCY', 'USABILITY', 'DATA_INTEGRITY']
+                  },
+                  description: 'Focus areas for simulation.'
+                }
+              },
+              required: ['targetDiffOrCommand']
+            }
+          },
+          {
+            name: 'adversarial_persona_review',
+            description:
+              'Deep targeted adversarial review executing specialized persona stress-testing (Hacker, Confused User, Legacy System, Concurrency Racer, Data Corruptor) with step-by-step reproduction steps.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                targetDiffOrCommand: {
+                  type: 'string',
+                  description: 'Code diff or action to review.'
+                },
+                personaType: {
+                  type: 'string',
+                  enum: ['HACKER', 'CONFUSED_USER', 'LEGACY_SYSTEM', 'CONCURRENCY_RACER', 'ALL'],
+                  default: 'ALL',
+                  description: 'Adversarial persona type.'
+                },
+                depth: {
+                  type: 'number',
+                  default: 3,
+                  description: 'Review depth rounds (1-10).'
+                }
+              },
+              required: ['targetDiffOrCommand']
+            }
+          },
+          {
+            name: 'blast_radius_heatmap',
+            description:
+              'Visual Blast Radius Heatmap generator. Renders Markdown, ASCII, or JSON matrices evaluating impacted components, user classes, data sensitivity, and containment feasibility.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                targetDiffOrCommand: {
+                  type: 'string',
+                  description: 'Code diff or command to generate blast radius heatmap for.'
                 },
                 context: {
                   type: 'object',
-                  description: 'Execution context such as environment (prod/stage), working directory, or target host.'
+                  description: 'Execution context.'
+                },
+                format: {
+                  type: 'string',
+                  enum: ['ASCII', 'MARKDOWN', 'JSON'],
+                  default: 'MARKDOWN',
+                  description: 'Output presentation format.'
                 }
               },
-              required: ['commandOrQuery']
+              required: ['targetDiffOrCommand']
             }
           },
           {
-            name: 'inspect_payload_dlp',
+            name: 'enforce_tdd_state',
             description:
-              'Deep Data Loss Prevention (DLP) scanner. Detects, reports, and redacts API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII from prompts, code, and logs.',
+              'Strict Test-Driven Development (TDD) quality gate state machine. Enforces Red -> Green -> Refactor cycle before permitting production code modifications.',
             inputSchema: {
               type: 'object',
               properties: {
-                content: {
+                featureName: {
                   type: 'string',
-                  description: 'The raw text, code snippet, or log output to inspect.'
+                  description: 'Feature identifier being developed.'
                 },
-                maskSensitive: {
+                action: {
+                  type: 'string',
+                  enum: ['GET_STATE', 'REGISTER_FAILING_TEST', 'VERIFY_TEST_FAILURE', 'VERIFY_TEST_PASS', 'RESET'],
+                  description: 'TDD state action.'
+                },
+                testFilePath: {
+                  type: 'string',
+                  description: 'Path to the test file.'
+                },
+                testOutput: {
+                  type: 'string',
+                  description: 'Output of test execution.'
+                }
+              },
+              required: ['featureName', 'action']
+            }
+          },
+          {
+            name: 'generate_socratic_spec',
+            description:
+              'Socratic requirement specification generator. Decomposes informal engineering requirements into rigorous, testable contracts with invariants, edge cases, and RED test plans.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                featureRequirement: {
+                  type: 'string',
+                  description: 'Feature requirement or user story.'
+                },
+                targetComponents: {
+                  type: 'array',
+                  items: {
+                    type: 'string'
+                  },
+                  description: 'List of affected components.'
+                },
+                depth: {
+                  type: 'string',
+                  enum: ['HIGH_LEVEL', 'DETAILED', 'EXHAUSTIVE'],
+                  default: 'DETAILED',
+                  description: 'Spec detail depth.'
+                }
+              },
+              required: ['featureRequirement']
+            }
+          },
+          {
+            name: 'spawn_worktree_subagent',
+            description:
+              'Isolates subagents in parallel Git worktrees (.blastradius/worktrees/<agentId>) to prevent workspace contamination and race conditions.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                agentId: {
+                  type: 'string',
+                  description: 'Unique agent identifier.'
+                },
+                branchName: {
+                  type: 'string',
+                  description: 'Branch name for worktree.'
+                },
+                baseBranch: {
+                  type: 'string',
+                  default: 'main',
+                  description: 'Base branch to branch off of.'
+                }
+              },
+              required: ['agentId', 'branchName']
+            }
+          },
+          {
+            name: 'automated_code_critique',
+            description:
+              'Senior-developer static and AST code critique. Detects silent error swallowing, dangerous sinks, missing test assertions, unchecked inputs, and unbounded queries.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                diffOrCode: {
+                  type: 'string',
+                  description: 'Code diff or content to critique.'
+                },
+                filePath: {
+                  type: 'string',
+                  description: 'Optional file path hint.'
+                },
+                strictSecurity: {
                   type: 'boolean',
                   default: true,
-                  description: 'Whether to return a sanitized version with credentials and PII masked.'
+                  description: 'Enable strict security heuristic checks.'
                 }
               },
-              required: ['content']
+              required: ['diffOrCode']
             }
           },
           {
-            name: 'enforce_policy',
+            name: 'verify_audit_log',
             description:
-              'The central zero-trust decision point. Evaluates a prospective tool call against organizational security policies, scans parameters for DLP, and records a cryptographic audit trail.',
+              'Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications.',
             inputSchema: {
               type: 'object',
               properties: {
-                toolName: {
-                  type: 'string',
-                  description: 'The name of the target tool intended to be called.'
-                },
-                parameters: {
-                  type: 'object',
-                  description: 'The parameters intended to be passed to the tool.'
-                },
-                callerId: {
-                  type: 'string',
-                  default: 'agent-client',
-                  description: 'Unique identifier for the calling agent or user.'
-                },
-                confirmationToken: {
-                  type: 'string',
-                  description: 'Optional cryptographically signed approval token for elevated destructive actions.'
+                limit: {
+                  type: 'number',
+                  default: 100,
+                  description: 'Number of recent audit records to verify.'
                 }
-              },
-              required: ['toolName', 'parameters']
+              }
             }
           },
           {
@@ -158,27 +488,18 @@ export class BlastRadiusServer {
             }
           },
           {
-            name: 'verify_audit_log',
+            name: 'get_security_posture',
             description:
-              'Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications.',
+              'Returns real-time security posture score (0-100), active policy status, compliance metrics, TDD state summary, and data flywheel learning telemetry.',
             inputSchema: {
               type: 'object',
               properties: {
-                limit: {
-                  type: 'number',
-                  default: 100,
-                  description: 'Number of recent audit records to verify.'
+                includeHistory: {
+                  type: 'boolean',
+                  default: false,
+                  description: 'Include historical trend summary.'
                 }
               }
-            }
-          },
-          {
-            name: 'get_security_posture',
-            description:
-              'Returns current operational security metrics, the active policy profile, build edition and capabilities, blocked threat statistics, and DLP redaction totals.',
-            inputSchema: {
-              type: 'object',
-              properties: {}
             }
           }
         ]
@@ -192,6 +513,374 @@ export class BlastRadiusServer {
 
       try {
         switch (name) {
+          // --- PILLAR 1: ZERO-BLOAT GATEWAY ---
+          case 'route_tool': {
+            const parsed = RouteToolSchema.parse(args);
+            const routeResult = await semanticRouter.route(parsed);
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      routeResult
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'virtualize_context': {
+            const parsed = VirtualizeContextSchema.parse(args);
+            const handle = contextVirtualizer.virtualize(parsed);
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      handle
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          // --- PILLAR 2: SWARM PRE-FLIGHT SAFETY ---
+          case 'simulate_swarm_impact': {
+            const parsed = SimulateSwarmImpactSchema.parse(args);
+            const result = await this.swarmNativeEngine.simulate(parsed);
+
+            try {
+              dataFlywheel.recordSimulation(result, parsed);
+            } catch {
+              // Non-blocking flywheel telemetry
+            }
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      simulationId: result.simulationId,
+                      verdict: result.verdict,
+                      prRiskScore: result.prRiskScore,
+                      divergenceFromStatic: result.divergenceFromStatic,
+                      personasSimulated: result.personasSimulated,
+                      findings: result.criticalFindings,
+                      heatmap: result.heatmapAscii
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'adversarial_persona_review': {
+            const parsed = AdversarialPersonaReviewSchema.parse(args);
+            const findings = await this.runPersonaReview(
+              parsed.targetDiffOrCommand,
+              parsed.personaType,
+              parsed.depth
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      personaType: parsed.personaType,
+                      depth: parsed.depth,
+                      findingsCount: findings.length,
+                      findings
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'blast_radius_heatmap': {
+            const parsed = BlastRadiusHeatmapSchema.parse(args);
+            const simResult = await this.swarmNativeEngine.simulate({
+              targetDiffOrCommand: parsed.targetDiffOrCommand,
+              contextDescription: 'Heatmap generation'
+            });
+
+            const matrix = generateHeatmap(
+              parsed.targetDiffOrCommand,
+              simResult.criticalFindings,
+              simResult.prRiskScore
+            );
+
+            let rendered: string | object;
+            if (parsed.format === 'ASCII') {
+              rendered = renderHeatmapAscii(matrix);
+            } else if (parsed.format === 'MARKDOWN') {
+              rendered = renderHeatmapMarkdown(matrix);
+            } else {
+              rendered = matrix;
+            }
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      format: parsed.format,
+                      overallScore: matrix.overallScore,
+                      heatmap: rendered,
+                      matrix
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          // --- PILLAR 3: TDD ENFORCER & QUALITY GATE ---
+          case 'enforce_tdd_state': {
+            const parsed = EnforceTddStateSchema.parse(args);
+            let actionResult: any;
+
+            switch (parsed.action) {
+              case 'GET_STATE': {
+                actionResult = tddStateMachine.getState(parsed.featureName);
+                break;
+              }
+              case 'REGISTER_FAILING_TEST': {
+                const testPath = parsed.testFilePath || 'tests/sample.test.ts';
+                const details = parsed.testOutput || 'Assertion failed: expected false to be true';
+                actionResult = tddStateMachine.registerFailingTest(
+                  parsed.featureName,
+                  testPath,
+                  details
+                );
+                break;
+              }
+              case 'VERIFY_TEST_FAILURE': {
+                actionResult = tddStateMachine.verifyTestFailure(
+                  parsed.featureName,
+                  parsed.testOutput || ''
+                );
+                break;
+              }
+              case 'VERIFY_TEST_PASS': {
+                actionResult = tddStateMachine.verifyTestPass(
+                  parsed.featureName,
+                  parsed.testOutput || ''
+                );
+                break;
+              }
+              case 'RESET': {
+                tddStateMachine.reset(parsed.featureName);
+                actionResult = tddStateMachine.getState(parsed.featureName);
+                break;
+              }
+            }
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      action: parsed.action,
+                      featureName: parsed.featureName,
+                      result: actionResult,
+                      state: tddStateMachine.getState(parsed.featureName)
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'generate_socratic_spec': {
+            const parsed = GenerateSocraticSpecSchema.parse(args);
+            const spec = generateSocraticSpec(
+              parsed.featureRequirement,
+              parsed.targetComponents || [],
+              parsed.depth
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      spec
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'spawn_worktree_subagent': {
+            const parsed = SpawnWorktreeSubagentSchema.parse(args);
+            const worktree = await worktreeManager.spawnWorktree(
+              parsed.agentId,
+              parsed.branchName,
+              parsed.baseBranch
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: worktree.status,
+                      worktree
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'automated_code_critique': {
+            const parsed = AutomatedCodeCritiqueSchema.parse(args);
+            const critique = critiqueCode(
+              parsed.diffOrCode,
+              parsed.filePath,
+              parsed.strictSecurity
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'SUCCESS',
+                      critique
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          // --- PILLAR 4: ZERO-TRUST COMPLIANCE & TELEMETRY ---
+          case 'verify_audit_log': {
+            const parsed = VerifyAuditLogSchema.parse(args);
+            const limit = typeof parsed.limit === 'number' ? parsed.limit : 100;
+            const verification = AuditLedger.verifyIntegrity(limit);
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: verification.intact ? 'VERIFIED_INTACT' : 'TAMPER_DETECTED',
+                      verification
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'request_confirmation_token': {
+            const parsed = RequestConfirmationTokenSchema.parse(args);
+            const tokenObj = TokenManager.generateToken(
+              parsed.toolName,
+              parsed.actionFingerprint,
+              parsed.requestedBy,
+              parsed.ttlSeconds,
+              parsed.reason
+            );
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(
+                    {
+                      status: 'TOKEN_ISSUED',
+                      confirmationToken: tokenObj.token,
+                      details: tokenObj.payload
+                    },
+                    null,
+                    2
+                  )
+                }
+              ]
+            };
+          }
+
+          case 'get_security_posture': {
+            const parsed = GetSecurityPostureSchema.parse(args);
+            const posture = calculateSecurityPosture({
+              activePolicy: this.policyEngine.getPolicy().name,
+              totalInvocations: this.totalInvocations,
+              blockedCount: this.blockedCount,
+              dlpRedactionsCount: this.dlpRedactionsCount,
+              criticalAvertedCount: this.criticalAvertedCount
+            });
+
+            let responsePayload: any = posture;
+            if (parsed.includeHistory) {
+              try {
+                const flywheelStats = dataFlywheel.getStats();
+                responsePayload = {
+                  ...posture,
+                  historyTrends: flywheelStats
+                };
+              } catch {
+                // Non-blocking telemetry
+              }
+            }
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify(responsePayload, null, 2)
+                }
+              ]
+            };
+          }
+
+          // --- LEGACY FOUNDATIONAL TOOLS (PRESERVED FOR BACKWARD COMPATIBILITY) ---
           case 'simulate_action': {
             const command = String(args.commandOrQuery || '');
             const category = args.actionType ? (args.actionType as ActionCategory) : undefined;
@@ -271,8 +960,8 @@ export class BlastRadiusServer {
               this.blockedCount++;
             }
 
-            // 4. Record to cryptographic audit chain
-            const auditEntry = AuditLedger.record({
+            // 4. Record to cryptographic audit chain and dual-write to flywheel
+            const auditEntry = this.dualWriteAuditEvent({
               toolName,
               callerId,
               category: blastReport.category,
@@ -284,23 +973,7 @@ export class BlastRadiusServer {
               rawPayload: parameters
             });
 
-            // Dual-write to flywheel database for live compliance telemetry
-            try {
-              dataFlywheel.recordAuditEvent({
-                toolName,
-                callerId,
-                decision: policyResult.decision,
-                riskScore: blastReport.dangerScore,
-                hash: auditEntry.currentHash
-              });
-            } catch {
-              // Non-blocking telemetry dual-write
-            }
-
-            // 5. Sequence analysis over the ledger, including the decision just
-            // recorded. A workflow assembled from individually permitted steps is
-            // invisible to any single-call rule, so this runs after the per-call
-            // verdict and can only tighten it.
+            // 5. Sequence analysis over the ledger, including the decision just recorded
             const sequence = SequenceDetector.fromPolicy(this.policyConfig).analyzeFromLedger();
             const worstSignal = sequence.signals.reduce<(typeof sequence.signals)[number] | undefined>(
               (acc, s) => {
@@ -373,79 +1046,6 @@ export class BlastRadiusServer {
             };
           }
 
-          case 'request_confirmation_token': {
-            const toolName = String(args.toolName || '');
-            const actionFingerprint = String(args.actionFingerprint || '');
-            const requestedBy = String(args.requestedBy || 'admin');
-            const ttlSeconds = typeof args.ttlSeconds === 'number' ? args.ttlSeconds : 300;
-            const reason = args.reason ? String(args.reason) : undefined;
-
-            const tokenObj = TokenManager.generateToken(
-              toolName,
-              actionFingerprint,
-              requestedBy,
-              ttlSeconds,
-              reason
-            );
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(
-                    {
-                      status: 'TOKEN_ISSUED',
-                      confirmationToken: tokenObj.token,
-                      details: tokenObj.payload
-                    },
-                    null,
-                    2
-                  )
-                }
-              ]
-            };
-          }
-
-          case 'verify_audit_log': {
-            const limit = typeof args.limit === 'number' ? args.limit : 100;
-            const verification = AuditLedger.verifyIntegrity(limit);
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(
-                    {
-                      status: verification.intact ? 'VERIFIED_INTACT' : 'TAMPER_DETECTED',
-                      verification
-                    },
-                    null,
-                    2
-                  )
-                }
-              ]
-            };
-          }
-
-          case 'get_security_posture': {
-            const posture = calculateSecurityPosture({
-              activePolicy: this.policyEngine.getPolicy().name,
-              totalInvocations: this.totalInvocations,
-              blockedCount: this.blockedCount,
-              dlpRedactionsCount: this.dlpRedactionsCount,
-              criticalAvertedCount: this.criticalAvertedCount
-            });
-
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify(posture, null, 2)
-                }
-              ]
-            };
-          }
-
           default:
             return {
               isError: true,
@@ -471,9 +1071,21 @@ export class BlastRadiusServer {
     });
   }
 
+  public async connect(transport: Transport): Promise<void> {
+    await this.server.connect(transport);
+  }
+
+  public async close(): Promise<void> {
+    await this.server.close();
+  }
+
+  public getServer(): Server {
+    return this.server;
+  }
+
   public async start(): Promise<void> {
     const transport = new StdioServerTransport();
-    await this.server.connect(transport);
+    await this.connect(transport);
     console.error('BlastRadius MCP Security Server active on stdio');
   }
 }

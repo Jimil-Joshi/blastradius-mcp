@@ -18,13 +18,20 @@ const SERVER_ENTRY = path.resolve(
   'index.js'
 );
 const EXPECTED_TOOLS = [
-  'enforce_policy',
+  'adversarial_persona_review',
+  'automated_code_critique',
+  'blast_radius_heatmap',
+  'enforce_tdd_state',
+  'generate_socratic_spec',
   'get_security_posture',
-  'inspect_payload_dlp',
   'request_confirmation_token',
-  'simulate_action',
-  'verify_audit_log'
+  'route_tool',
+  'simulate_swarm_impact',
+  'spawn_worktree_subagent',
+  'verify_audit_log',
+  'virtualize_context'
 ];
+
 
 interface ToolTextContent {
   type?: string;
