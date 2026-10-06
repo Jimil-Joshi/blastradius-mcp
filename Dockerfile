@@ -87,7 +87,7 @@ USER node
 # Docker's default SIGKILL after the 10s grace period.
 STOPSIGNAL SIGTERM
 
-# Default to --help so a bare `docker run` is inspectable and exits 0.
-# Clients override this by appending their own arguments (e.g. `proxy --command ...`).
+# Default to running the MCP security server on stdio.
+# Clients can override this by appending arguments (e.g. `proxy --command ...`).
 ENTRYPOINT ["node", "dist/src/index.js"]
-CMD ["--help"]
+CMD []

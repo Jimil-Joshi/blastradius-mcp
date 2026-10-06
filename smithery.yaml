@@ -1,0 +1,33 @@
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    properties:
+      policyFile:
+        type: string
+        description: "Path to a custom security policy JSON file"
+      signingKey:
+        type: string
+        description: "Custom secret key for signing cryptographic approval tokens"
+      auditKey:
+        type: string
+        description: "Custom secret key for signing audit ledger entries"
+  commandFunction: |-
+    (config) => {
+      const args = ["dist/src/index.js"];
+      if (config && config.policyFile) {
+        args.push(`--policy=${config.policyFile}`);
+      }
+      const env = {};
+      if (config && config.signingKey) {
+        env.BLAST_RADIUS_SIGNING_KEY = config.signingKey;
+      }
+      if (config && config.auditKey) {
+        env.BLAST_RADIUS_AUDIT_KEY = config.auditKey;
+      }
+      return {
+        command: "node",
+        args: args,
+        env: env
+      };
+    }
