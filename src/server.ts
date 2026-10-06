@@ -8,6 +8,7 @@ import { TokenManager } from './security/tokenManager.js';
 import { AuditLedger } from './security/auditLedger.js';
 import { getEdition } from './security/edition.js';
 import { SequenceDetector } from './analyzer/sequenceDetector.js';
+import { calculateSecurityPosture } from './security/postureCalculator.js';
 
 /** Ordinal severity ordering, so a signal can be compared against a decision. */
 function severityWeight(severity: SeverityLevel): number {
@@ -413,36 +414,19 @@ export class BlastRadiusServer {
           }
 
           case 'get_security_posture': {
-            const edition = getEdition();
-            const auditCheck = AuditLedger.verifyIntegrity(50);
+            const posture = calculateSecurityPosture({
+              activePolicy: this.policyEngine.getPolicy().name,
+              totalInvocations: this.totalInvocations,
+              blockedCount: this.blockedCount,
+              dlpRedactionsCount: this.dlpRedactionsCount,
+              criticalAvertedCount: this.criticalAvertedCount
+            });
 
             return {
               content: [
                 {
                   type: 'text',
-                  text: JSON.stringify(
-                    {
-                      status: this.blockedCount > 10 ? 'ALERT' : 'ACTIVE',
-                      edition: edition.edition,
-                      license: edition.license,
-                      licenseKeyRequired: edition.licenseKeyRequired,
-                      rateLimited: edition.rateLimited,
-                      capabilities: edition.capabilities,
-                      metrics: {
-                        totalInvocations: this.totalInvocations,
-                        blockedCount: this.blockedCount,
-                        dlpRedactionsCount: this.dlpRedactionsCount,
-                        criticalAvertedCount: this.criticalAvertedCount
-                      },
-                      auditLedger: {
-                        intact: auditCheck.intact,
-                        recordedEntries: auditCheck.totalEntries
-                      },
-                      activePolicy: this.policyEngine.getPolicy().name
-                    },
-                    null,
-                    2
-                  )
+                  text: JSON.stringify(posture, null, 2)
                 }
               ]
             };

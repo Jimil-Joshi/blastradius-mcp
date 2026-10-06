@@ -257,4 +257,5 @@ export const GetSecurityPostureSchema = z.object({
 export * from './gateway/types.js';
 export * from './swarm/types.js';
 export * from './quality/types.js';
+export * from './storage/types.js';
 
