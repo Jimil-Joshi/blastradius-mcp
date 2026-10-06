@@ -1,6 +1,6 @@
 {
   "name": "blastradius-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
   "type": "module",
   "main": "dist/src/index.js",
