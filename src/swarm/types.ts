@@ -30,6 +30,7 @@ export interface SwarmSimulationResult {
   divergenceFromStatic: number;
   durationMs?: number;
   timestamp?: string;
+  heatmapMatrix?: HeatmapMatrix;
 }
 
 export interface AdversarialPersona {
@@ -55,4 +56,20 @@ export interface HeatmapMatrix {
   asciiTable: string;
   markdownTable: string;
   overallScore: number;
+  userClasses?: Array<{
+    userClass: 'Admin' | 'Customer' | 'Guest' | 'Public' | string;
+    exposure: 'SAFE' | 'ELEVATED' | 'CRITICAL';
+    detail: string;
+  }>;
+  dataSensitivity?: Array<{
+    category: 'Secrets' | 'PII' | 'Internal' | 'Public' | string;
+    exposure: 'CONTAINED' | 'ELEVATED' | 'CRITICAL';
+    detail: string;
+  }>;
+  containmentFeasibility?: {
+    level: 'HIGH' | 'MEDIUM' | 'LOW';
+    rollbackEase: string;
+    compensationActions: string[];
+  };
 }
+
