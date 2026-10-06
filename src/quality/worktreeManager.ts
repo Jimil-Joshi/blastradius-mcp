@@ -160,6 +160,13 @@ export class WorktreeManager {
 
       const existing = this.activeWorktrees.get(agentId);
       if (existing) {
+        // Also clean up the created branch if not a protected root branch
+        if (
+          existing.branchName &&
+          !['main', 'master', 'HEAD', 'develop', 'feature/blastradius-zero-v2'].includes(existing.branchName)
+        ) {
+          await this.runGit(['branch', '-D', existing.branchName], root).catch(() => {});
+        }
         existing.status = 'CLEANED';
         this.activeWorktrees.delete(agentId);
       }
@@ -182,4 +189,4 @@ export class WorktreeManager {
   }
 }
 
-export const worktreeManager = new WorktreeManager();
+export const worktreeManager = WorktreeManager.getInstance();

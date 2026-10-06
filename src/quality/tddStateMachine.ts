@@ -154,6 +154,22 @@ export class TddStateMachine {
   }
 
   /**
+   * Explicitly starts the implementation phase (transitions RED_CONFIRMED to GREEN_PENDING).
+   */
+  public startGreenPhase(featureName: string): TddStateContext {
+    const state = this.getState(featureName);
+    if (state.phase === TddPhase.RED_CONFIRMED) {
+      state.phase = TddPhase.GREEN_PENDING;
+      state.history?.push({
+        phase: TddPhase.GREEN_PENDING,
+        timestamp: new Date().toISOString(),
+        details: 'Started implementation (GREEN_PENDING phase).'
+      });
+    }
+    return state;
+  }
+
+  /**
    * Evaluates if modifying a given file path is allowed under current TDD phase.
    */
   public canModifyProductionCode(
@@ -172,6 +188,16 @@ export class TddStateMachine {
       };
     }
 
+    // Automatically transition to GREEN_PENDING when production code modification begins
+    if (state.phase === TddPhase.RED_CONFIRMED) {
+      state.phase = TddPhase.GREEN_PENDING;
+      state.history?.push({
+        phase: TddPhase.GREEN_PENDING,
+        timestamp: new Date().toISOString(),
+        details: 'Production code modification started: transitioned to GREEN_PENDING.'
+      });
+    }
+
     return { allowed: true };
   }
 
@@ -184,32 +210,48 @@ export class TddStateMachine {
 
   /**
    * Heuristic to determine if a target path is test/spec code vs production code.
+   * Requires explicit directory or delimiter boundaries to prevent stem collisions
+   * (e.g. contestant.ts, spectator.ts, perspective.ts).
    */
   public isTestFile(filePath: string): boolean {
     const normalized = filePath.replace(/\\/g, '/').toLowerCase();
     return (
       /(^|\/)(test|tests|spec|specs|__tests__|__specs__)\//i.test(normalized) ||
-      /\.(test|spec)\.[a-z0-9]+$/i.test(normalized) ||
-      /(^|\/)[a-z0-9_-]*(test|spec)[a-z0-9_-]*\.[a-z0-9]+$/i.test(normalized)
+      /(\.|\b|_|-)(test|spec)\.[a-z0-9]+$/i.test(normalized) ||
+      /(^|\/)(test|spec)[_\.-][a-z0-9_-]+\.[a-z0-9]+$/i.test(normalized)
     );
   }
 
   private detectFailureSignals(output: string): boolean {
+    const lines = output.split(/\r?\n/);
+
+    // Filter out lines that are confirmed pass assertions or summaries
+    const passLineRegex = /^\s*(?:✔|✓|ok\b|PASS\b|\+)\s+/i;
+    const nonPassLines: string[] = [];
+
+    for (const line of lines) {
+      if (!passLineRegex.test(line)) {
+        nonPassLines.push(line);
+      }
+    }
+
+    const nonPassText = nonPassLines.join('\n');
+
     const strongFailure =
-      /AssertionError/i.test(output) ||
-      /ERR_ASSERTION/i.test(output) ||
-      /exited with code [1-9]/i.test(output) ||
-      /\bnot ok\b/i.test(output) ||
-      /[✖×]/i.test(output) ||
-      /expected\s+.*\s+to\s+(?:equal|be|match|include|have)/i.test(output) ||
-      /\b(?:stack trace|Error:)/i.test(output);
+      /AssertionError/i.test(nonPassText) ||
+      /ERR_ASSERTION/i.test(nonPassText) ||
+      /exited with code [1-9]/i.test(nonPassText) ||
+      /\bnot ok\b/i.test(nonPassText) ||
+      /[✖×]/i.test(nonPassText) ||
+      /expected\s+.*\s+to\s+(?:equal|be|match|include|have)/i.test(nonPassText) ||
+      /\b(?:stack trace|Error:)/i.test(nonPassText);
 
     if (strongFailure) {
       return true;
     }
 
     // Strip out zero-failure tokens like "fail 0", "0 fail", "0 failures", "failures: 0"
-    const cleaned = output.replace(
+    const cleaned = nonPassText.replace(
       /(?:0\s+fail(?:ed|ures)?|fail(?:ed|ures)?(?::|\s+)\s*0|0\s+errors|errors(?::|\s+)\s*0)/gi,
       ''
     );
@@ -230,4 +272,4 @@ export class TddStateMachine {
   }
 }
 
-export const tddStateMachine = new TddStateMachine();
+export const tddStateMachine = TddStateMachine.getInstance();

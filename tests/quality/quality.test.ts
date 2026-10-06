@@ -34,6 +34,13 @@ test('TddStateMachine - initial state and phase management', () => {
   // Alternative test path patterns (specs, __tests__)
   assert.strictEqual(machine.canModifyProductionCode(feature, 'src/__tests__/auth.spec.ts').allowed, true);
   assert.strictEqual(machine.canModifyProductionCode(feature, 'test/helpers.ts').allowed, true);
+  assert.strictEqual(machine.canModifyProductionCode(feature, 'src/auth_test.ts').allowed, true);
+  assert.strictEqual(machine.canModifyProductionCode(feature, 'src/auth-spec.ts').allowed, true);
+
+  // Strict boundary check: words containing 'test' or 'spec' as substrings are production files and MUST be blocked
+  assert.strictEqual(machine.canModifyProductionCode(feature, 'src/game/contestant.ts').allowed, false);
+  assert.strictEqual(machine.canModifyProductionCode(feature, 'src/view/spectator.ts').allowed, false);
+  assert.strictEqual(machine.canModifyProductionCode(feature, 'src/render/perspective.ts').allowed, false);
 });
 
 test('TddStateMachine - Red phase workflow and test failure verification', () => {
@@ -87,14 +94,19 @@ test('TddStateMachine - Green phase verification and transition to REFACTOR', ()
   machine.verifyTestFailure(feature, 'AssertionError: expected 200 to equal 429');
   assert.strictEqual(machine.getState(feature).phase, TddPhase.RED_CONFIRMED);
 
-  // Now production code edit IS allowed!
+  // Now production code edit IS allowed and advances state to GREEN_PENDING
   const prodCheck = machine.canModifyProductionCode(feature, 'src/rateLimiter.ts');
   assert.strictEqual(prodCheck.allowed, true);
+  assert.strictEqual(machine.getState(feature).phase, TddPhase.GREEN_PENDING);
+
+  // Explicit startGreenPhase also works idempotently
+  machine.startGreenPhase(feature);
+  assert.strictEqual(machine.getState(feature).phase, TddPhase.GREEN_PENDING);
 
   // Attempting verifyTestPass while tests still fail should fail
   const stillFailing = machine.verifyTestPass(feature, 'AssertionError: expected 200 to equal 429\nfailed 1 test');
   assert.strictEqual(stillFailing.verified, false);
-  assert.strictEqual(machine.getState(feature).phase, TddPhase.RED_CONFIRMED);
+  assert.strictEqual(machine.getState(feature).phase, TddPhase.GREEN_PENDING);
 
   // Verifying clean passing output transitions to REFACTOR
   const passOutput = `
@@ -116,6 +128,28 @@ test('TddStateMachine - Green phase verification and transition to REFACTOR', ()
   // Reset feature state
   machine.reset(feature);
   assert.strictEqual(machine.getState(feature).phase, TddPhase.IDLE);
+});
+
+test('TddStateMachine - verifyTestPass handles test titles with Error: and logs cleanly', () => {
+  const machine = new TddStateMachine();
+  const feature = 'error-handling';
+
+  machine.registerFailingTest(feature, 'tests/error.test.ts', 'should catch error');
+  machine.verifyTestFailure(feature, 'AssertionError: expected error to be caught');
+  machine.startGreenPhase(feature);
+
+  // Test suite output where passed test description contains "Error:"
+  const passOutputWithErrorTitle = `
+    ✔ validates Error: bad input was caught successfully
+    ✔ handles AssertionError message formatting without crashing
+    ℹ tests 2
+    ℹ pass 2
+    ℹ fail 0
+    ok
+  `;
+  const result = machine.verifyTestPass(feature, passOutputWithErrorTitle);
+  assert.strictEqual(result.verified, true);
+  assert.strictEqual(result.state.phase, TddPhase.REFACTOR);
 });
 
 test('TddStateMachine - cannot verify test pass without confirmed RED phase', () => {
@@ -298,7 +332,33 @@ test('AutomatedCodeCritique - scores clean code with 100 and passes strict secur
   assert.strictEqual(result.findings.length, 0);
 });
 
-test('Quality Module - singleton instances exported and functional', () => {
+test('AutomatedCodeCritique - does not flag RegExp.exec() as a shell sink', () => {
+  const codeWithRegexExec = `
+    const pattern = /hello/g;
+    const match = pattern.exec('hello world');
+  `;
+  const result = critiqueCode(codeWithRegexExec, 'src/parser.ts');
+  const sinks = result.findings.filter(f => f.ruleId === 'DANGEROUS_SHELL_SINK');
+  assert.strictEqual(sinks.length, 0);
+});
+
+test('AutomatedCodeCritique - flags multi-line unbounded SQL queries in template strings', () => {
+  const codeWithMultilineSql = `
+    const query = \`
+      SELECT id, name, email
+      FROM users
+      WHERE active = true
+    \`;
+  `;
+  const result = critiqueCode(codeWithMultilineSql, 'src/repo.ts');
+  const unbounded = result.findings.find(f => f.ruleId === 'UNBOUNDED_DB_QUERY');
+  assert.ok(unbounded, 'Should flag multi-line SELECT without LIMIT');
+  assert.strictEqual(unbounded?.category, 'PERFORMANCE');
+});
+
+test('Quality Module - singleton instances exported and synchronized with class getInstance', () => {
   assert.ok(tddStateMachine instanceof TddStateMachine);
   assert.ok(worktreeManager instanceof WorktreeManager);
+  assert.strictEqual(tddStateMachine, TddStateMachine.getInstance());
+  assert.strictEqual(worktreeManager, WorktreeManager.getInstance());
 });

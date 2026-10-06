@@ -29,7 +29,7 @@ export function critiqueCode(
   inspectUncheckedInputs(lines, filePath, findings);
 
   // 5. Inspect Unbounded Database Queries
-  inspectUnboundedQueries(lines, filePath, findings);
+  inspectUnboundedQueries(diffOrCode, filePath, findings);
 
   // Calculate score
   let score = 100;
@@ -73,8 +73,9 @@ function isTestFile(filePath?: string, code?: string): boolean {
   if (filePath) {
     const normalized = filePath.replace(/\\/g, '/').toLowerCase();
     if (
-      /(^|\/)(test|tests|spec|specs|__tests__)\//.test(normalized) ||
-      /\.(test|spec)\.[a-z0-9]+$/i.test(normalized)
+      /(^|\/)(test|tests|spec|specs|__tests__|__specs__)\//.test(normalized) ||
+      /(\.|\b|_|-)(test|spec)\.[a-z0-9]+$/i.test(normalized) ||
+      /(^|\/)(test|spec)[_\.-][a-z0-9_-]+\.[a-z0-9]+$/i.test(normalized)
     ) {
       return true;
     }
@@ -131,8 +132,8 @@ function inspectDangerousShellSinks(lines: string[], filePath?: string, findings
       { name: 'eval', regex: /\beval\s*\(/ },
       { name: 'Function constructor', regex: /\bFunction\s*\(/ },
       { name: 'child_process', regex: /['"]child_process['"]/ },
-      { name: 'exec', regex: /\bexec\s*\(/ },
-      { name: 'spawn', regex: /\bspawn\s*\(/ }
+      { name: 'exec', regex: /(?<!\.)\bexec\s*\(|(?:child_process|cp)\.exec\s*\(/ },
+      { name: 'spawn', regex: /(?<!\.)\bspawn\s*\(|(?:child_process|cp)\.spawn\s*\(/ }
     ];
 
     for (const sink of sinks) {
@@ -210,28 +211,61 @@ function inspectUncheckedInputs(lines: string[], filePath?: string, findings?: C
   });
 }
 
-function inspectUnboundedQueries(lines: string[], filePath?: string, findings?: CodeCritiqueFinding[]): void {
+function inspectUnboundedQueries(code: string, filePath?: string, findings?: CodeCritiqueFinding[]): void {
   if (!findings) return;
 
-  lines.forEach((line, index) => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+  // Match SQL SELECT ... FROM queries across single or multiple lines in strings or template literals
+  const queryRegex = /(?:['"`])\s*(SELECT\b[\s\S]*?\bFROM\b[\s\S]*?)(?:['"`]|;)/gi;
+  let match: RegExpExecArray | null;
 
-    // Detect SQL SELECT without LIMIT / TOP / take:
-    const isSelect = /\bSELECT\b[\s\S]*?\bFROM\b/i.test(trimmed);
-    const hasLimit = /\b(LIMIT\b|\btake\b|\bTOP\b|\bFETCH FIRST\b)/i.test(trimmed);
+  while ((match = queryRegex.exec(code)) !== null) {
+    const queryBody = match[1];
+    const hasLimit = /\b(?:LIMIT|take|TOP|FETCH FIRST)\b/i.test(queryBody);
 
-    if (isSelect && !hasLimit) {
+    if (!hasLimit) {
+      const matchIndex = match.index;
+      const precedingCode = code.slice(0, matchIndex);
+      const lineNumber = precedingCode.split(/\r?\n/).length;
+      const lines = code.split(/\r?\n/);
+      const lineContent = lines[lineNumber - 1] || queryBody.slice(0, 60);
+
       findings.push({
         ruleId: 'UNBOUNDED_DB_QUERY',
         category: 'PERFORMANCE',
         severity: 'MEDIUM',
         filePath,
-        lineNumber: index + 1,
-        lineContent: trimmed,
+        lineNumber,
+        lineContent: lineContent.trim(),
         message: 'Unbounded database SELECT query detected without LIMIT clause. Risk of memory exhaustion.',
         suggestion: 'Add a LIMIT clause or paginated take constraint to protect datastore and memory buffers.'
       });
+    }
+  }
+
+  // Also check single-line non-quoted queries if not already flagged
+  const lines = code.split(/\r?\n/);
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('//') || trimmed.startsWith('*')) return;
+    if (/\bSELECT\b[\s\S]*?\bFROM\b/i.test(trimmed)) {
+      const alreadyFlagged = findings.some(
+        f => f.lineNumber === index + 1 && f.ruleId === 'UNBOUNDED_DB_QUERY'
+      );
+      if (!alreadyFlagged) {
+        const hasLimit = /\b(?:LIMIT|take|TOP|FETCH FIRST)\b/i.test(trimmed);
+        if (!hasLimit) {
+          findings.push({
+            ruleId: 'UNBOUNDED_DB_QUERY',
+            category: 'PERFORMANCE',
+            severity: 'MEDIUM',
+            filePath,
+            lineNumber: index + 1,
+            lineContent: trimmed,
+            message: 'Unbounded database SELECT query detected without LIMIT clause. Risk of memory exhaustion.',
+            suggestion: 'Add a LIMIT clause or paginated take constraint to protect datastore and memory buffers.'
+          });
+        }
+      }
     }
   });
 }
