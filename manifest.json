@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "blastradius-mcp",
   "display_name": "BlastRadius MCP (Zero-Trust Security Proxy)",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
   "long_description": "BlastRadius MCP is a local stdio Model Context Protocol server that sits between an AI agent and the tools it wants to call. Before anything executes, `simulate_action` scores the action (danger 0-100), estimates blast radius, and reports how reversible it would be. `inspect_payload_dlp` scans text, code, and logs for API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII, and returns a masked copy. `enforce_policy` is the central decision point: it evaluates a prospective tool call against a policy profile, DLP-scans the parameters, and appends a hash-chained audit entry. High-impact actions require an HMAC-SHA256 signed, time-bound step-up token minted by `request_confirmation_token`, which makes human approval non-repudiable. `verify_audit_log` re-walks the hash chain to detect tampering, deletions, or unauthorized edits, and `get_security_posture` reports live threat statistics, the active policy profile, and DLP redaction totals. The server is fully local: it opens no sockets, sends nothing to third parties, and has no license key or paid tier.",
   "author": {
@@ -34,27 +34,125 @@
   "tools": [
     {
       "name": "simulate_action",
-      "description": "Simulates and predicts the blast radius, danger score (0-100), and destructive reversibility of a shell command, SQL query, or cloud operation before execution."
+      "description": "Simulates and predicts the blast radius, danger score (0-100), and destructive reversibility of a shell command, SQL query, or cloud operation before execution.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "commandOrQuery": {
+            "type": "string",
+            "description": "The command, query, or script payload to simulate."
+          },
+          "actionType": {
+            "type": "string",
+            "enum": ["SHELL", "SQL", "CLOUD", "FILESYSTEM", "NETWORK", "GENERIC"],
+            "description": "Optional action category hint."
+          },
+          "context": {
+            "type": "object",
+            "description": "Execution context such as environment (prod/stage), working directory, or target host."
+          }
+        },
+        "required": ["commandOrQuery"]
+      }
     },
     {
       "name": "inspect_payload_dlp",
-      "description": "Deep Data Loss Prevention (DLP) scanner. Detects, reports, and redacts API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII from prompts, code, and logs."
+      "description": "Deep Data Loss Prevention (DLP) scanner. Detects, reports, and redacts API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII from prompts, code, and logs.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The raw text, code snippet, or log output to inspect."
+          },
+          "maskSensitive": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether to return a sanitized version with credentials and PII masked."
+          }
+        },
+        "required": ["content"]
+      }
     },
     {
       "name": "enforce_policy",
-      "description": "The central zero-trust decision point. Evaluates a prospective tool call against organizational security policies, scans parameters for DLP, and records a cryptographic audit trail."
+      "description": "The central zero-trust decision point. Evaluates a prospective tool call against organizational security policies, scans parameters for DLP, and records a cryptographic audit trail.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "type": "string",
+            "description": "The name of the target tool intended to be called."
+          },
+          "parameters": {
+            "type": "object",
+            "description": "The parameters intended to be passed to the tool."
+          },
+          "callerId": {
+            "type": "string",
+            "default": "agent-client",
+            "description": "Unique identifier for the calling agent or user."
+          },
+          "confirmationToken": {
+            "type": "string",
+            "description": "Optional cryptographically signed approval token for elevated destructive actions."
+          }
+        },
+        "required": ["toolName", "parameters"]
+      }
     },
     {
       "name": "request_confirmation_token",
-      "description": "Generates a time-bound, cryptographically signed (HMAC-SHA256) step-up approval token allowing an agent to execute high-impact actions when human consent is granted."
+      "description": "Generates a time-bound, cryptographically signed (HMAC-SHA256) step-up approval token allowing an agent to execute high-impact actions when human consent is granted.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "type": "string",
+            "description": "The specific tool name to authorize."
+          },
+          "actionFingerprint": {
+            "type": "string",
+            "description": "Unique signature or hash of the approved payload."
+          },
+          "requestedBy": {
+            "type": "string",
+            "description": "Identifier of the human supervisor or authorizing entity."
+          },
+          "ttlSeconds": {
+            "type": "number",
+            "default": 300,
+            "description": "Token validity period in seconds (default: 300s)."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Justification for elevation."
+          }
+        },
+        "required": ["toolName", "actionFingerprint", "requestedBy"]
+      }
     },
     {
       "name": "verify_audit_log",
-      "description": "Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications."
+      "description": "Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "default": 100,
+            "description": "Number of recent audit records to verify."
+          }
+        }
+      }
     },
     {
       "name": "get_security_posture",
-      "description": "Returns current operational security metrics, the active policy profile, build edition and capabilities, blocked threat statistics, and DLP redaction totals."
+      "description": "Returns current operational security metrics, the active policy profile, build edition and capabilities, blocked threat statistics, and DLP redaction totals.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ],
   "keywords": [

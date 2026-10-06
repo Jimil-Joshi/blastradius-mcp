@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   }
 
   if (args.includes('--version') || args.includes('-v')) {
-    console.log('blastradius-mcp v1.0.1');
+    console.log('blastradius-mcp v1.0.2');
     process.exit(0);
   }
 
