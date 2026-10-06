@@ -19,10 +19,6 @@ export {
   AuditEventRecord
 };
 
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 export class DataFlywheel {
   private db: DatabaseSync;
   private dbPath: string;
@@ -35,16 +31,22 @@ export class DataFlywheel {
 
     if (this.dbPath !== ':memory:') {
       const dir = path.dirname(this.dbPath);
-      if (!fs.existsSync(dir)) {
-        try {
+      try {
+        if (!fs.existsSync(dir)) {
           fs.mkdirSync(dir, { recursive: true });
-        } catch {
-          // Fall back gracefully if directory creation fails
         }
+      } catch {
+        // Fall back gracefully if directory creation fails
+        this.dbPath = ':memory:';
       }
     }
 
-    this.db = new DatabaseSync(this.dbPath, { timeout: 5000 });
+    try {
+      this.db = new DatabaseSync(this.dbPath, { timeout: 5000 });
+    } catch {
+      this.dbPath = ':memory:';
+      this.db = new DatabaseSync(':memory:', { timeout: 5000 });
+    }
     this.initSchema();
   }
 
@@ -110,79 +112,94 @@ export class DataFlywheel {
   }
 
   public recordSimulation(result: SwarmSimulationResult, request: SwarmSimulationRequest): void {
-    const insertSim = this.db.prepare(`
-      INSERT INTO simulation_records (
-        id, target_diff, context_desc, risk_score, verdict, personas_count, divergence, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    this.db.exec('BEGIN IMMEDIATE;');
+    try {
+      const insertSim = this.db.prepare(`
+        INSERT INTO simulation_records (
+          id, target_diff, context_desc, risk_score, verdict, personas_count, divergence, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-    const simCreatedAt = result.timestamp ?? new Date().toISOString();
-    insertSim.run(
-      result.simulationId,
-      request.targetDiffOrCommand,
-      request.contextDescription ?? '',
-      result.prRiskScore,
-      result.verdict,
-      result.personasSimulated,
-      result.divergenceFromStatic,
-      simCreatedAt
-    );
-
-    const insertVector = this.db.prepare(`
-      INSERT INTO attack_vectors (
-        id, simulation_id, persona_type, attack_vector, severity, description, suggested_test, reproduction_steps, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertEnhancement = this.db.prepare(`
-      INSERT INTO rule_enhancements (
-        id, vector_id, generated_rule_id, name, forbidden_pattern, action, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    for (const finding of result.criticalFindings ?? []) {
-      const vectorId = crypto.randomUUID();
-      const reproSteps = Array.isArray(finding.reproductionSteps)
-        ? JSON.stringify(finding.reproductionSteps)
-        : (finding.reproductionSteps ?? '');
-      const createdAt = new Date().toISOString();
-
-      insertVector.run(
-        vectorId,
+      const simCreatedAt = result.timestamp ?? new Date().toISOString();
+      insertSim.run(
         result.simulationId,
-        finding.personaType,
-        finding.attackVector,
-        finding.severity,
-        finding.description,
-        finding.suggestedTest ?? '',
-        reproSteps,
-        createdAt
+        request.targetDiffOrCommand,
+        request.contextDescription ?? '',
+        result.prRiskScore,
+        result.verdict,
+        result.personasSimulated,
+        result.divergenceFromStatic,
+        simCreatedAt
       );
 
-      if (finding.severity === 'HIGH' || finding.severity === 'CRITICAL') {
-        const enhancementId = crypto.randomUUID();
-        const slug = finding.attackVector
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '_')
-          .replace(/^_+|_+$/g, '')
-          .slice(0, 30);
-        const generatedRuleId = `auto_${slug}_${crypto.randomBytes(4).toString('hex')}`;
-        const name = `Auto-Mitigation for ${finding.attackVector}`;
-        const forbiddenPattern = `(?i)\\b(${escapeRegex(finding.attackVector)})\\b`;
-        const action = 'BLOCK';
-        const status = 'PENDING';
+      const insertVector = this.db.prepare(`
+        INSERT INTO attack_vectors (
+          id, simulation_id, persona_type, attack_vector, severity, description, suggested_test, reproduction_steps, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
 
-        insertEnhancement.run(
-          enhancementId,
+      const insertEnhancement = this.db.prepare(`
+        INSERT INTO rule_enhancements (
+          id, vector_id, generated_rule_id, name, forbidden_pattern, action, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      for (const finding of result.criticalFindings ?? []) {
+        const vectorId = crypto.randomUUID();
+        const reproSteps = Array.isArray(finding.reproductionSteps)
+          ? JSON.stringify(finding.reproductionSteps)
+          : (finding.reproductionSteps ?? '');
+        const createdAt = new Date().toISOString();
+
+        insertVector.run(
           vectorId,
-          generatedRuleId,
-          name,
-          forbiddenPattern,
-          action,
-          status,
+          result.simulationId,
+          finding.personaType,
+          finding.attackVector,
+          finding.severity,
+          finding.description,
+          finding.suggestedTest ?? '',
+          reproSteps,
           createdAt
         );
+
+        if (finding.severity === 'HIGH' || finding.severity === 'CRITICAL') {
+          const enhancementId = crypto.randomUUID();
+          const slug = finding.attackVector
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 30);
+          const generatedRuleId = `auto_${slug}_${crypto.randomBytes(4).toString('hex')}`;
+          const name = `Auto-Mitigation for ${finding.attackVector}`;
+          // Clean, normalized pattern compatible with PolicyEngine substring matching
+          const forbiddenPattern = finding.attackVector.toLowerCase();
+          const action = 'BLOCK';
+          const status = 'PENDING';
+
+          insertEnhancement.run(
+            enhancementId,
+            vectorId,
+            generatedRuleId,
+            name,
+            forbiddenPattern,
+            action,
+            status,
+            createdAt
+          );
+        }
       }
+
+      this.db.exec('COMMIT;');
+    } catch (err) {
+      if (this.db.isTransaction) {
+        try {
+          this.db.exec('ROLLBACK;');
+        } catch {
+          // ignore rollback failure
+        }
+      }
+      throw err;
     }
   }
 

@@ -63,7 +63,7 @@ export interface PostureTelemetryInput {
   dlpRedactionsCount?: number;
   criticalAvertedCount?: number;
   flywheelStats?: FlywheelStats;
-  flywheel?: any;
+  flywheel?: { getStats(): FlywheelStats };
 }
 
 export interface SecurityPosture {

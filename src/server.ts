@@ -9,6 +9,7 @@ import { AuditLedger } from './security/auditLedger.js';
 import { getEdition } from './security/edition.js';
 import { SequenceDetector } from './analyzer/sequenceDetector.js';
 import { calculateSecurityPosture } from './security/postureCalculator.js';
+import { dataFlywheel } from './storage/flywheel.js';
 
 /** Ordinal severity ordering, so a signal can be compared against a decision. */
 function severityWeight(severity: SeverityLevel): number {
@@ -282,6 +283,19 @@ export class BlastRadiusServer {
               dlpFindingsCount: dlpScan.findingsCount,
               rawPayload: parameters
             });
+
+            // Dual-write to flywheel database for live compliance telemetry
+            try {
+              dataFlywheel.recordAuditEvent({
+                toolName,
+                callerId,
+                decision: policyResult.decision,
+                riskScore: blastReport.dangerScore,
+                hash: auditEntry.currentHash
+              });
+            } catch {
+              // Non-blocking telemetry dual-write
+            }
 
             // 5. Sequence analysis over the ledger, including the decision just
             // recorded. A workflow assembled from individually permitted steps is

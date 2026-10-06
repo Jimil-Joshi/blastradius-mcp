@@ -1,8 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 import { DataFlywheel, dataFlywheel, RuleEnhancementRecord } from '../../src/storage/flywheel.js';
 import { PostureCalculator, calculateSecurityPosture } from '../../src/security/postureCalculator.js';
 import { SwarmSimulationRequest, SwarmSimulationResult } from '../../src/swarm/types.js';
+import { PolicyEngine } from '../../src/policy/policyEngine.js';
+import { BlastRadiusReport, SeverityLevel, ActionCategory, PolicyDecision } from '../../src/types.js';
 
 test('DataFlywheel - initializes schema and tables in memory', () => {
   const flywheel = new DataFlywheel(':memory:');
@@ -117,6 +122,8 @@ test('DataFlywheel - generates rule enhancements for HIGH and CRITICAL findings 
   assert.ok(pending.some((r: RuleEnhancementRecord) => r.name.includes('REMOTE_CODE_EXECUTION')));
   assert.ok(pending.some((r: RuleEnhancementRecord) => r.name.includes('RACE_CONDITION_LOCK')));
   assert.ok(!pending.some((r: RuleEnhancementRecord) => r.name.includes('STALE_CACHE_HEADER')));
+  assert.strictEqual(pending.find((r: RuleEnhancementRecord) => r.name.includes('REMOTE_CODE_EXECUTION'))?.forbiddenPattern, 'remote_code_execution');
+  assert.ok(!pending.some((r: RuleEnhancementRecord) => r.forbiddenPattern.includes('(?i)')));
 
   const statsBefore = flywheel.getStats();
   assert.strictEqual(statsBefore.pendingEnhancements, 2);
@@ -285,3 +292,181 @@ test('DataFlywheel - singleton instance is exported and responsive', () => {
   const stats = dataFlywheel.getStats();
   assert.strictEqual(typeof stats.totalSimulations, 'number');
 });
+
+test('DataFlywheel - persists data across instances using real file path with WAL mode', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'br-flywheel-'));
+  const dbFile = path.join(tmpDir, 'test-flywheel.db');
+
+  try {
+    const fw1 = new DataFlywheel(dbFile);
+    fw1.recordAuditEvent({
+      toolName: 'test_tool',
+      callerId: 'agent-1',
+      decision: 'ALLOW',
+      riskScore: 10,
+      hash: 'hash-1'
+    });
+    fw1.recordSimulation(
+      {
+        simulationId: 'sim-persist-1',
+        prRiskScore: 90,
+        verdict: 'BLOCK',
+        personasSimulated: 5,
+        divergenceFromStatic: 20,
+        heatmapAscii: '',
+        criticalFindings: [
+          {
+            personaType: 'HACKER',
+            attackVector: 'SQL_INJECTION',
+            severity: 'CRITICAL',
+            description: 'SQLi detected',
+            suggestedTest: 'test_sqli()'
+          }
+        ]
+      },
+      { targetDiffOrCommand: 'DROP TABLE users;' }
+    );
+    const stats1 = fw1.getStats();
+    assert.strictEqual(stats1.totalSimulations, 1);
+    assert.strictEqual(stats1.pendingEnhancements, 1);
+    fw1.close();
+
+    // Verify file exists on disk
+    assert.ok(fs.existsSync(dbFile));
+
+    // Reopen in a second DataFlywheel instance and verify persistence
+    const fw2 = new DataFlywheel(dbFile);
+    const stats2 = fw2.getStats();
+    assert.strictEqual(stats2.totalSimulations, 1);
+    assert.strictEqual(stats2.pendingEnhancements, 1);
+    assert.strictEqual(stats2.attackVectorsLearned, 1);
+
+    // Verify rule enhancement pattern is normalized and compatible with PolicyEngine
+    const pending = fw2.getPendingEnhancements();
+    assert.strictEqual(pending.length, 1);
+    assert.strictEqual(pending[0].forbiddenPattern, 'sql_injection');
+    assert.ok(!pending[0].forbiddenPattern.includes('(?i)'));
+
+    fw2.close();
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('DataFlywheel - gracefully falls back to :memory: if directory cannot be created', () => {
+  const invalidPath = 'Z:\\non_existent_impossible_directory_9999\\flywheel.db';
+  const fw = new DataFlywheel(invalidPath);
+  assert.ok(fw);
+  const stats = fw.getStats();
+  assert.strictEqual(stats.totalSimulations, 0);
+  fw.close();
+});
+
+test('DataFlywheel - wraps writes in atomic transaction and rolls back on failure', () => {
+  const fw = new DataFlywheel(':memory:');
+  const validRequest = { targetDiffOrCommand: 'ls' };
+  const validResult: SwarmSimulationResult = {
+    simulationId: 'sim-valid',
+    prRiskScore: 10,
+    verdict: 'SAFE',
+    personasSimulated: 5,
+    divergenceFromStatic: 0,
+    heatmapAscii: '',
+    criticalFindings: []
+  };
+
+  fw.recordSimulation(validResult, validRequest);
+  assert.strictEqual(fw.getStats().totalSimulations, 1);
+
+  // Attempt to record duplicate simulationId which will violate PRIMARY KEY constraint
+  const badResult: SwarmSimulationResult = {
+    ...validResult,
+    criticalFindings: [
+      {
+        personaType: 'HACKER',
+        attackVector: 'TEST_ROLLBACK_VECTOR',
+        severity: 'CRITICAL',
+        description: 'Should not be inserted',
+        suggestedTest: 'test()'
+      }
+    ]
+  };
+
+  assert.throws(() => {
+    fw.recordSimulation(badResult, validRequest);
+  });
+
+  // Verify atomic rollback: attack vectors and rule enhancements were not inserted
+  const stats = fw.getStats();
+  assert.strictEqual(stats.totalSimulations, 1);
+  assert.strictEqual(stats.attackVectorsLearned, 0);
+  assert.strictEqual(stats.pendingEnhancements, 0);
+
+  fw.close();
+});
+
+test('DataFlywheel - generated rule enhancements are compatible with PolicyEngine', () => {
+  const fw = new DataFlywheel(':memory:');
+  fw.recordSimulation(
+    {
+      simulationId: 'sim-policy-check',
+      prRiskScore: 95,
+      verdict: 'BLOCK',
+      personasSimulated: 5,
+      divergenceFromStatic: 30,
+      heatmapAscii: '',
+      criticalFindings: [
+        {
+          personaType: 'HACKER',
+          attackVector: 'SQL_INJECTION',
+          severity: 'CRITICAL',
+          description: 'SQL injection detected',
+          suggestedTest: 'test()'
+        }
+      ]
+    },
+    { targetDiffOrCommand: 'SELECT * FROM users' }
+  );
+
+  const pending = fw.getPendingEnhancements();
+  assert.strictEqual(pending.length, 1);
+  const ruleRecord = pending[0];
+
+  // Configure PolicyEngine with a policy rule utilizing the generated forbiddenPattern
+  const engine = new PolicyEngine({
+    version: '1.0.0',
+    name: 'Dynamic Learned Policy',
+    description: 'Policy generated from flywheel',
+    defaultDecision: PolicyDecision.ALLOW,
+    rules: [
+      {
+        id: ruleRecord.generatedRuleId,
+        name: ruleRecord.name,
+        description: 'Auto mitigation rule',
+        action: PolicyDecision.BLOCK,
+        enabled: true,
+        forbiddenPatterns: [ruleRecord.forbiddenPattern]
+      }
+    ]
+  });
+
+  const dummyReport: BlastRadiusReport = {
+    dangerScore: 10,
+    severity: SeverityLevel.LOW,
+    category: ActionCategory.SHELL,
+    reasons: [],
+    affectedEntities: [],
+    destructive: false,
+    irreversible: false,
+    rollbackFeasible: true,
+    recommendedMitigations: []
+  };
+
+  // Evaluate matching payload
+  const result = engine.evaluate('test_tool', { query: 'exploit_sql_injection_payload' }, dummyReport);
+  assert.strictEqual(result.decision, PolicyDecision.BLOCK);
+  assert.strictEqual(result.ruleMatched, ruleRecord.generatedRuleId);
+
+  fw.close();
+});
+
