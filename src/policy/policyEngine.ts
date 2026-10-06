@@ -1,5 +1,6 @@
 import { BlastRadiusReport, PolicyDecision, SecurityPolicyConfig, SeverityLevel } from '../types.js';
 import { ZERO_TRUST_POLICY } from './defaultPolicies.js';
+import { ShellResolver } from '../analyzer/shellResolver.js';
 import { TokenManager } from '../security/tokenManager.js';
 
 export interface PolicyEvaluationResult {
@@ -8,6 +9,22 @@ export interface PolicyEvaluationResult {
   reasons: string[];
   requiresToken: boolean;
   tokenValid?: boolean;
+}
+
+const SEVERITY_ORDER: SeverityLevel[] = [
+  SeverityLevel.SAFE,
+  SeverityLevel.LOW,
+  SeverityLevel.MEDIUM,
+  SeverityLevel.HIGH,
+  SeverityLevel.CRITICAL
+];
+
+/**
+ * Ordinal position of a severity level, so thresholds can be compared with >=.
+ */
+function severityRank(severity: SeverityLevel): number {
+  const index = SEVERITY_ORDER.indexOf(severity);
+  return index === -1 ? 0 : index;
 }
 
 export class PolicyEngine {
@@ -35,7 +52,15 @@ export class PolicyEngine {
     confirmationToken?: string
   ): PolicyEvaluationResult {
     const reasons: string[] = [];
-    const commandText = JSON.stringify(params).toLowerCase();
+
+    // Both the serialized request and the shell-resolved form are checked. The
+    // resolved form matters: `D=/etc; cat $D/shadow` contains no literal
+    // "/etc/shadow", so a substring match on the raw request alone would let the
+    // policy gate bypass the same resolution layer the scoring engine uses.
+    const serialized = JSON.stringify(params);
+    const resolution = ShellResolver.resolve(serialized);
+    const commandText = serialized.toLowerCase();
+    const resolvedText = resolution.resolved.toLowerCase();
 
     // 1. Evaluate explicit BLOCK rules
     for (const rule of this.policy.rules) {
@@ -44,7 +69,8 @@ export class PolicyEngine {
       // Check forbidden string patterns
       if (rule.forbiddenPatterns) {
         for (const pattern of rule.forbiddenPatterns) {
-          if (commandText.includes(pattern.toLowerCase())) {
+          const needle = pattern.toLowerCase();
+          if (commandText.includes(needle) || resolvedText.includes(needle)) {
             reasons.push(`Violates rule [${rule.name}]: Matches strictly forbidden pattern '${pattern}'`);
             return {
               decision: PolicyDecision.BLOCK,
@@ -59,7 +85,8 @@ export class PolicyEngine {
       // Check protected paths
       if (rule.protectedPaths) {
         for (const path of rule.protectedPaths) {
-          if (commandText.includes(path.toLowerCase())) {
+          const needle = path.toLowerCase();
+          if (commandText.includes(needle) || resolvedText.includes(needle)) {
             reasons.push(`Violates rule [${rule.name}]: Accesses protected path '${path}'`);
             return {
               decision: PolicyDecision.BLOCK,
@@ -77,16 +104,24 @@ export class PolicyEngine {
       if (!rule.enabled) continue;
 
       if (rule.action === PolicyDecision.REQUIRE_CONFIRMATION) {
-        const isHighOrCritical =
-          blastReport.severity === SeverityLevel.CRITICAL ||
-          blastReport.severity === SeverityLevel.HIGH;
+        // Honour the rule's own severityThreshold; fall back to HIGH, which is
+        // the baseline the shipped zero-trust policy relies on.
+        const threshold = rule.severityThreshold ?? SeverityLevel.HIGH;
+        const meetsThreshold = severityRank(blastReport.severity) >= severityRank(threshold);
 
-        if (isHighOrCritical || (rule.requireApprovalForDestructive && blastReport.destructive)) {
+        if (meetsThreshold || (rule.requireApprovalForDestructive && blastReport.destructive)) {
           // If a confirmation token is provided, verify it
           if (confirmationToken) {
             const tokenVerification = TokenManager.verifyToken(confirmationToken, toolName);
             if (tokenVerification.valid) {
-              reasons.push(`Action elevated and approved via valid token: ${tokenVerification.payload?.tokenId}`);
+              // Burn the token the instant it authorises an action. Without this
+              // the same token would stay valid for its whole TTL and could be
+              // replayed, which would defeat the point of step-up approval.
+              const tokenId = tokenVerification.payload?.tokenId;
+              if (tokenId) {
+                TokenManager.consumeToken(tokenId, tokenVerification.payload?.expiresAt);
+              }
+              reasons.push(`Action elevated and approved via valid token: ${tokenId}`);
               return {
                 decision: PolicyDecision.ALLOW,
                 ruleMatched: rule.id,
@@ -97,6 +132,18 @@ export class PolicyEngine {
             } else {
               reasons.push(`Provided confirmation token is invalid or expired: ${tokenVerification.error}`);
             }
+          }
+
+          // A CRITICAL irreversible action must not be downgraded to "needs a token" on
+          // the strength of a text match alone.
+          if (this.blocksOnEngineVerdict(blastReport)) {
+            reasons.push(this.engineFloorReason(blastReport));
+            return {
+              decision: PolicyDecision.BLOCK,
+              ruleMatched: 'ENGINE-FLOOR',
+              reasons,
+              requiresToken: false
+            };
           }
 
           reasons.push(
@@ -113,11 +160,49 @@ export class PolicyEngine {
       }
     }
 
-    // 3. Fallback to default policy decision
+    // 3. Fallback to default policy decision.
+    //
+    // The rule loop above matches text; the blast report is the authority on what
+    // the call actually does. A structured payload like
+    // `{command:'rm', args:['-rf','/']}` contains no `rm -rf /` substring for any
+    // forbidden-pattern rule to match, while the engine scores it 100 CRITICAL and
+    // irreversible. Without this floor the policy gate would be strictly more
+    // permissive than the engine on the same call, which is the wrong direction
+    // for the only component that can say no.
+    if (this.blocksOnEngineVerdict(blastReport)) {
+      reasons.push(this.engineFloorReason(blastReport));
+      return {
+        decision: PolicyDecision.BLOCK,
+        ruleMatched: 'ENGINE-FLOOR',
+        reasons,
+        requiresToken: false
+      };
+    }
+
     return {
       decision: this.policy.defaultDecision,
       reasons: reasons.length > 0 ? reasons : ['Complies with all active security baseline rules.'],
       requiresToken: false
     };
+  }
+
+  /**
+   * True when the engine's verdict is severe enough that no text rule's silence
+   * may be read as permission.
+   */
+  private blocksOnEngineVerdict(blastReport: BlastRadiusReport): boolean {
+    return (
+      this.policy.engineCriticalBlocks === true &&
+      blastReport.severity === SeverityLevel.CRITICAL &&
+      blastReport.destructive === true &&
+      blastReport.dangerScore >= 90
+    );
+  }
+
+  private engineFloorReason(blastReport: BlastRadiusReport): string {
+    return (
+      `Blocked by engine floor: ${blastReport.severity} severity ${blastReport.dangerScore} ` +
+      `with irreversible blast radius. ${blastReport.reasons[0] ?? ''}`.trim()
+    );
   }
 }

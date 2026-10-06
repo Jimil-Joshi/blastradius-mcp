@@ -1,9 +1,11 @@
 {
+  "_comment": "Cline config -> place in your Cline MCP settings.",
   "mcpServers": {
     "blastradius-security": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "C:/Users/Jim-per/MCP's/blastradius-mcp/dist/src/index.js"
+        "-y",
+        "blastradius-mcp"
       ],
       "disabled": false,
       "autoApprove": []

@@ -5,3 +5,4 @@ blastradius-audit.jsonl
 .DS_Store
 .env
 .env.local
+.readme-transcripts.txt

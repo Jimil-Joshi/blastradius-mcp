@@ -17,7 +17,7 @@ export const DANGEROUS_RULES: RuleSignature[] = [
   {
     id: 'SH-001',
     category: ActionCategory.SHELL,
-    pattern: /\brm\s+(-[rfRF]{1,4}\s+)?(\/|\*|~|\$HOME|\.\/|\.\.)(\s|$)/,
+    pattern: /\brm\s+(-[rfRF]{1,4}\s+)?(\/|\*|~|\$HOME|\$\{HOME[^}]*\}|\$\{!HOME[^}]*\}|\$\{#HOME[^}]*\}|\/UNKNOWN|\bARITH\b|\.\/|\.\.)(\s|$)/,
     dangerScore: 100,
     severity: SeverityLevel.CRITICAL,
     reason: 'Recursive root, home, or wildcard filesystem deletion detected (rm -rf / or *)',
@@ -50,13 +50,36 @@ export const DANGEROUS_RULES: RuleSignature[] = [
   {
     id: 'SH-004',
     category: ActionCategory.SHELL,
-    pattern: /\b(curl|wget|fetch|invoke-webrequest)\b.*\|\s*(bash|sh|zsh|powershell|pwsh)\b/i,
+    // The download-and-execute shape, named from the producing side rather than
+    // the consuming one. `curl | sh` was the only form scored, so the same bytes
+    // arriving through a process substitution or an `eval` read as two unrelated
+    // commands.
+    //
+    // A substitution feeding a sink is not on its own the shape: `eval "$(echo
+    // hi)"` is ordinary scripting. What makes it the shape is the substitution
+    // carrying a fetch or a decoder, so that is what the second alternative
+    // requires.
+    pattern: /\b(curl|wget|fetch|iwr|invoke-webrequest|invoke-restmethod)\b[^;\n]*(\|\s*(bash|sh|zsh|powershell|pwsh|python\d?|node|ruby|perl)\b|<\(|>\()|\b(eval|exec|source)\b[^;\n]*(?:\$\(|`)[^;\n]*(\bcurl\b|\bwget\b|\bfetch\b|\bbase64\b|\bb64decode\b|\batob\s*\()|\b(eval|exec|source)\b[^\n]*(<\(|>\()/i,
     dangerScore: 90,
     severity: SeverityLevel.HIGH,
-    reason: 'Unverified remote script piped directly into shell execution (curl | sh)',
+    reason: 'Remote script flows directly into an interpreter without review (curl | sh, eval "$(curl ...)", bash <(curl ...))',
     destructive: false,
     irreversible: false,
     mitigations: ['Download script, verify SHA-256 checksum, inspect contents before execution']
+  },
+  {
+    id: 'SH-009',
+    category: ActionCategory.SHELL,
+    // A decoder whose output is handed to something that runs it. Decoding alone
+    // is routine and is deliberately not matched; the sink is what makes it the
+    // download-and-execute shape.
+    pattern: /\bbase64\b[^\n]*[ -](-d|--decode|-D)\b[^\n]*(\|\s*(sh|bash|zsh|python\d?|node|ruby|perl)\b|\b(eval|exec|xargs|source)\b)|\b(eval|exec|xargs)\b[^\n]*(\bbase64\b|\bb64decode\b|\batob\s*\(|base64\.b64decode)/i,
+    dangerScore: 90,
+    severity: SeverityLevel.HIGH,
+    reason: 'Decoded payload is piped into or evaluated by a shell, so the executed bytes are absent from the request',
+    destructive: false,
+    irreversible: false,
+    mitigations: ['Decode to a file, read the decoded text, then execute the reviewed file']
   },
   {
     id: 'SH-005',
@@ -118,7 +141,9 @@ export const DANGEROUS_RULES: RuleSignature[] = [
   {
     id: 'SQL-002',
     category: ActionCategory.SQL,
-    pattern: /\b(DROP|TRUNCATE)\s+TABLE\b/i,
+    // `TABLE` is optional in a TRUNCATE statement, so `psql -c "TRUNCATE users"`
+    // has to match too, not just the spelled-out form.
+    pattern: /\bDROP\s+TABLE\b|\bTRUNCATE\s+(TABLE\s+)?[`"\w.]/i,
     dangerScore: 90,
     severity: SeverityLevel.CRITICAL,
     reason: 'DROP or TRUNCATE TABLE purges table schema and all contained data immediately',
@@ -194,17 +219,98 @@ export const DANGEROUS_RULES: RuleSignature[] = [
     irreversible: true,
     mitigations: ['Deactivate credentials first before permanent deletion']
   },
-
-  // --- FILESYSTEM SENSITIVE RULES ---
   {
-    id: 'FS-001',
-    category: ActionCategory.FILESYSTEM,
-    pattern: /(\.env|\.aws\/credentials|\.ssh\/id_rsa|\/etc\/shadow|\/etc\/passwd|service-account.*\.json)\b/i,
+    id: 'CLD-004',
+    category: ActionCategory.CLOUD,
+    pattern: /\b(terraform|pulumi)\s+(destroy|apply)\b|\bapply\s+-auto-approve\b/i,
+    dangerScore: 95,
+    severity: SeverityLevel.CRITICAL,
+    reason: 'Infrastructure-as-code teardown or unattended apply can destroy every managed resource in one command',
+    destructive: true,
+    irreversible: true,
+    mitigations: [
+      'Run plan and share the diff before any apply',
+      'Scope state and lock the workspace so one agent cannot apply unreviewed changes',
+      'Require human sign-off on the plan output, not just on the command'
+    ]
+  },
+  {
+    id: 'CLD-005',
+    category: ActionCategory.CLOUD,
+    pattern: /\b(s3\s+rb|gsutil\s+rm\b.*\s-r\b|az\s+storage\s+(blob|file)\s+delete|blob\s+remove|rm\s+.*s3:\/\/)|\bs3\s+sync\b[^;\n]*--delete\b/i,
+    dangerScore: 95,
+    severity: SeverityLevel.CRITICAL,
+    reason: 'Object storage mass deletion (bucket removal or a syncing delete) destroys data and versions',
+    destructive: true,
+    irreversible: true,
+    mitigations: ['Enable bucket versioning and object lock', 'Dry-run the sync against a scratch prefix first']
+  },
+  {
+    id: 'CLD-006',
+    category: ActionCategory.CLOUD,
+    pattern: /\bhelm\s+(uninstall|delete)\b|\bkubectl\s+(delete|rollout\s+undo|apply\s+-f\s+\S*delete)\b/i,
+    dangerScore: 85,
+    severity: SeverityLevel.HIGH,
+    reason: 'Kubernetes workload removal or rollback will take running services offline',
+    destructive: true,
+    irreversible: true,
+    mitigations: ['Confirm replica counts and PDBs before removal', 'Pin the previous manifest before deleting']
+  },
+  {
+    id: 'CLD-007',
+    category: ActionCategory.CLOUD,
+    pattern: /\bnpm\s+publish\b|\btwine\s+upload\b|\bdocker\s+push\b.*(--latest|:latest)\b/i,
     dangerScore: 80,
     severity: SeverityLevel.HIGH,
-    reason: 'Direct access or modification to sensitive credentials or system auth files',
+    reason: 'Publishing to a public package or image registry is irreversible once consumed downstream',
+    destructive: false,
+    irreversible: true,
+    mitigations: ['Publish from CI with provenance attestations, never from an agent session', 'Pin the version and verify the registry scope']
+  },
+
+  // --- FILESYSTEM SENSITIVE RULES ---
+{
+    id: 'FS-001',
+    category: ActionCategory.FILESYSTEM,
+    pattern: /(\.env|id_rsa|id_ed25519|\.pem|\.aws\/credentials|\.ssh\/|\/etc\/shadow|\/etc\/passwd|service[-_]account\.json|\.npmrc|\.pypirc|\.git-credentials)/i,
+    dangerScore: 80,
+    severity: SeverityLevel.HIGH,
+    reason: 'Access to credential or secret file risks exposing private keys and session tokens',
     destructive: false,
     irreversible: false,
-    mitigations: ['Use vault secret references instead of raw credential files']
+    mitigations: [
+      'Use a secrets manager rather than reading credential files into agent context',
+      'Redact secrets before they enter the model context window'
+    ]
+  },
+  {
+    id: 'FS-002',
+    category: ActionCategory.FILESYSTEM,
+    // Mass deletion by synchronisation and pruning is the shape that actually
+    // appears in incidents. `rsync --delete` removes destination files absent
+    // from the source, so a mistyped trailing slash is a silent wipe.
+    pattern: /\brsync\b[^;\n]*\s--delete\b|\b(scp|aws\s+s3\s+sync)\b[^;\n]*\s--delete\b|\bdocker\s+(system|volume|image|network)\s+prune\b|\bgit\s+worktree\s+remove\b[^;\n]*--force\b|\btruncate\b[^;\n]*-s\s*0/,
+    dangerScore: 90,
+    severity: SeverityLevel.CRITICAL,
+    reason: 'Synchronisation and pruning tools delete data that is not named in the command',
+    destructive: true,
+    irreversible: true,
+    mitigations: [
+      'Run with --dry-run or -n first and read what it intends to remove',
+      'Confirm a trailing slash on the source; omitting it inverts the direction of the sync'
+    ]
+  },
+  {
+    id: 'DB-001',
+    category: ActionCategory.SQL,
+    // Destructive operations reached through a client binary rather than a
+    // connection string, which is how they usually arrive in an agent session.
+    pattern: /\b(redis-cli|mongosh|mongo)\b[^\n]*\b(FLUSHALL|FLUSHDB|dropDatabase|drop)\b|\bmysql\b[^\n]*\bDROP\s+DATABASE\b|\bpsql\b[^\n]*\b(DROP\s+(DATABASE|SCHEMA)|TRUNCATE)\b/i,
+    dangerScore: 95,
+    severity: SeverityLevel.CRITICAL,
+    reason: 'Destructive database operation issued through a client binary rather than a query',
+    destructive: true,
+    irreversible: true,
+    mitigations: ['Take a snapshot, and confirm the connection string points at the intended instance']
   }
 ];

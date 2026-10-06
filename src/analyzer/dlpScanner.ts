@@ -72,7 +72,13 @@ const DLP_PATTERNS: DLPPatternDef[] = [
     type: 'CREDIT_CARD_NUMBER',
     category: 'PII',
     severity: SeverityLevel.HIGH,
-    pattern: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|3(?:0[0-5]|[68][0-9])[0-9]{11}|6(?:011|5[0-9]{2})[0-9]{12})\b/g,
+    // Visa, MasterCard, Amex, Discover, Diners, UnionPay.
+    // `[ \-]?` between digit groups so the spaced ("4111 1111 1111 1111") and
+    // hyphenated ("4111-1111-1111-1111") forms match too. Those are how card
+    // numbers actually appear in logs and support tickets, and the contiguous-
+    // digits-only version missed every one of them.
+    pattern:
+      /\b(?:4[0-9]{3}(?:[ \-]?[0-9]{4}){3}|5[1-5][0-9]{2}(?:[ \-]?[0-9]{4}){3}|3[47][0-9]{2}[ \-]?[0-9]{6}[ \-]?[0-9]{5}|3(?:0[0-5]|[68][0-9])[0-9]{2}[ \-]?[0-9]{6}[ \-]?[0-9]{5}|6(?:011|5[0-9]{2})[0-9]{2}(?:[ \-]?[0-9]{4}){3})\b/g,
     maskPrefix: 'REDACTED_CREDIT_CARD'
   },
   {

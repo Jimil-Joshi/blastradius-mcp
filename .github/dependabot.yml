@@ -1,0 +1,17 @@
+# BlastRadius MCP is a security tool, so dependency freshness is a security
+# property, not just maintenance. Both ecosystems are checked weekly: the two
+# runtime dependencies (@modelcontextprotocol/sdk, zod) plus the dev toolchain,
+# and the GitHub Actions used by the CI and CodeQL workflows.
+
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

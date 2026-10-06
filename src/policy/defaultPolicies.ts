@@ -5,6 +5,11 @@ export const ZERO_TRUST_POLICY: SecurityPolicyConfig = {
   name: 'Default Zero-Trust Shield',
   description: 'Blocks critical destructive operations, requires confirmation tokens for high severity actions, and protects sensitive secrets.',
   defaultDecision: PolicyDecision.ALLOW,
+  // The engine is the authority on what a call does, not only on what its text
+  // says. This is what stops a structured payload such as
+  // `{command:'rm', args:['-rf','/']}`, which contains no `rm -rf /` substring for
+  // any text rule to match, from slipping past ZT-001.
+  engineCriticalBlocks: true,
   protectedEnvironments: ['prod', 'production', 'live', 'main'],
   allowedDirectories: [],
   rules: [

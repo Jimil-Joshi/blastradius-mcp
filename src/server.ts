@@ -6,19 +6,29 @@ import { DLPScanner } from './analyzer/dlpScanner.js';
 import { PolicyEngine } from './policy/policyEngine.js';
 import { TokenManager } from './security/tokenManager.js';
 import { AuditLedger } from './security/auditLedger.js';
-import { LicenseValidator } from './security/licenseValidator.js';
-import { ActionCategory, PolicyDecision, SeverityLevel } from './types.js';
+import { getEdition } from './security/edition.js';
+import { SequenceDetector } from './analyzer/sequenceDetector.js';
+
+/** Ordinal severity ordering, so a signal can be compared against a decision. */
+function severityWeight(severity: SeverityLevel): number {
+  return [SeverityLevel.SAFE, SeverityLevel.LOW, SeverityLevel.MEDIUM, SeverityLevel.HIGH, SeverityLevel.CRITICAL]
+    .indexOf(severity);
+}
+import { ActionCategory, PolicyDecision, SecurityPolicyConfig, SeverityLevel } from './types.js';
 
 export class BlastRadiusServer {
   private server: Server;
   private policyEngine: PolicyEngine;
+  /** Retained so sequence detection honours the same thresholds as the policy. */
+  private policyConfig?: SecurityPolicyConfig;
   private totalInvocations = 0;
   private blockedCount = 0;
   private dlpRedactionsCount = 0;
   private criticalAvertedCount = 0;
 
-  constructor() {
-    this.policyEngine = new PolicyEngine();
+  constructor(customPolicy?: SecurityPolicyConfig) {
+    this.policyConfig = customPolicy;
+    this.policyEngine = new PolicyEngine(customPolicy);
     AuditLedger.initialize();
 
     this.server = new Server(
@@ -163,7 +173,7 @@ export class BlastRadiusServer {
           {
             name: 'get_security_posture',
             description:
-              'Returns current operational security metrics, active policy profile, license tier, blocked threat statistics, and DLP redaction totals.',
+              'Returns current operational security metrics, the active policy profile, build edition and capabilities, blocked threat statistics, and DLP redaction totals.',
             inputSchema: {
               type: 'object',
               properties: {}
@@ -272,6 +282,23 @@ export class BlastRadiusServer {
               rawPayload: parameters
             });
 
+            // 5. Sequence analysis over the ledger, including the decision just
+            // recorded. A workflow assembled from individually permitted steps is
+            // invisible to any single-call rule, so this runs after the per-call
+            // verdict and can only tighten it.
+            const sequence = SequenceDetector.fromPolicy(this.policyConfig).analyzeFromLedger();
+            const worstSignal = sequence.signals.reduce<(typeof sequence.signals)[number] | undefined>(
+              (acc, s) => {
+                if (!acc) return s;
+                return severityWeight(s.severity) > severityWeight(acc.severity) ? s : acc;
+              },
+              undefined
+            );
+            const escalate =
+              worstSignal !== undefined &&
+              policyResult.decision === PolicyDecision.ALLOW &&
+              worstSignal.recommendedAction !== 'FLAG_FOR_REVIEW';
+
             return {
               content: [
                 {
@@ -279,14 +306,20 @@ export class BlastRadiusServer {
                   text: JSON.stringify(
                     {
                       status: policyResult.decision === PolicyDecision.BLOCK ? 'BLOCKED' : 'PROCEED',
-                      decision: policyResult.decision,
-                      reasons: policyResult.reasons,
-                      requiresToken: policyResult.requiresToken,
+                      decision: escalate ? 'REQUIRE_CONFIRMATION' : policyResult.decision,
+                      ruleMatched: policyResult.ruleMatched ?? null,
+                      reasons: escalate
+                        ? [...policyResult.reasons, `Sequence analysis: ${worstSignal!.reason}`]
+                        : policyResult.reasons,
+                      requiresToken: escalate || policyResult.requiresToken,
+                      tokenValid: policyResult.tokenValid ?? false,
                       blastRadius: {
                         dangerScore: blastReport.dangerScore,
                         severity: blastReport.severity,
                         destructive: blastReport.destructive,
-                        reversibility: blastReport.rollbackFeasible ? 'ROLLBACK_FEASIBLE' : 'IRREVERSIBLE'
+                        reversibility: blastReport.rollbackFeasible ? 'ROLLBACK_FEASIBLE' : 'IRREVERSIBLE',
+                        resolvedCommand: blastReport.resolution?.resolvedCommand ?? null,
+                        traits: blastReport.resolution?.traits ?? []
                       },
                       dlp: {
                         findingsCount: dlpScan.findingsCount,
@@ -294,6 +327,20 @@ export class BlastRadiusServer {
                           type: f.type,
                           category: f.category,
                           preview: f.preview
+                        }))
+                      },
+                      sequence: {
+                        analysedEntries: sequence.analysedEntries,
+                        truncated: sequence.truncated,
+                        highestSeverity: sequence.highestSeverity,
+                        signals: sequence.signals.map((s) => ({
+                          id: s.id,
+                          severity: s.severity,
+                          confidence: s.confidence,
+                          reason: s.reason,
+                          recommendedAction: s.recommendedAction,
+                          fromIndex: s.evidence.fromIndex,
+                          toIndex: s.evidence.toIndex
                         }))
                       },
                       auditReceipt: {
@@ -366,7 +413,7 @@ export class BlastRadiusServer {
           }
 
           case 'get_security_posture': {
-            const license = LicenseValidator.getStatus();
+            const edition = getEdition();
             const auditCheck = AuditLedger.verifyIntegrity(50);
 
             return {
@@ -376,8 +423,11 @@ export class BlastRadiusServer {
                   text: JSON.stringify(
                     {
                       status: this.blockedCount > 10 ? 'ALERT' : 'ACTIVE',
-                      licenseTier: license.tier,
-                      licensedFeatures: license.features,
+                      edition: edition.edition,
+                      license: edition.license,
+                      licenseKeyRequired: edition.licenseKeyRequired,
+                      rateLimited: edition.rateLimited,
+                      capabilities: edition.capabilities,
                       metrics: {
                         totalInvocations: this.totalInvocations,
                         blockedCount: this.blockedCount,

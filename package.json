@@ -1,44 +1,79 @@
 {
   "name": "blastradius-mcp",
   "version": "1.0.0",
-  "description": "Enterprise-grade Zero-Trust Security, Blast Radius Simulation, DLP Redaction, and Cryptographic Audit Proxy for Model Context Protocol (MCP)",
+  "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
   "bin": {
     "blastradius-mcp": "./dist/src/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "manifest.json"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc",
+    "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
     "start": "node dist/src/index.js",
     "test": "node --test dist/tests/**/*.test.js",
-    "test:src": "npm run build && node --test dist/tests/**/*.test.js"
+    "test:src": "npm run build && node --test dist/tests/**/*.test.js",
+    "pretest": "npm run build",
+    "bundle": "npm run build && npm prune --omit=dev && npx --yes @anthropic-ai/mcpb@2.1.2 pack . blastradius-mcp.mcpb"
   },
   "keywords": [
     "mcp",
     "model-context-protocol",
-    "security",
+    "mcp-server",
     "ai-security",
+    "agent-security",
+    "agentic-ai",
+    "security",
     "zero-trust",
+    "guardrails",
     "blast-radius",
     "dlp",
-    "guardrails",
+    "prompt-injection",
     "audit-log",
+    "audit-trail",
     "claude",
     "cursor",
-    "agentic-ai",
+    "vscode",
     "proxy",
-    "gateway"
+    "security-proxy",
+    "zero-trust-security",
+    "secret-scanning",
+    "pii-redaction"
   ],
-  "author": "BlastRadius Security",
+  "author": "Jimil Joshi",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Jimil-Joshi/blastradius-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Jimil-Joshi/blastradius-mcp/issues"
+  },
+  "homepage": "https://github.com/Jimil-Joshi/blastradius-mcp#readme",
+  "funding": [
+    {
+      "type": "github",
+      "url": "https://github.com/sponsors/Jimil-Joshi"
+    }
+  ],
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.6.1",
-    "zod": "^3.24.2"
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^22.13.9",
-    "typescript": "^5.8.2"
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
   }
 }

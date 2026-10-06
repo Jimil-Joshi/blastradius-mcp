@@ -4,7 +4,7 @@ import { BlastRadiusEngine } from '../analyzer/blastRadiusEngine.js';
 import { DLPScanner } from '../analyzer/dlpScanner.js';
 import { PolicyEngine } from '../policy/policyEngine.js';
 import { AuditLedger } from '../security/auditLedger.js';
-import { PolicyDecision, SeverityLevel } from '../types.js';
+import { PolicyDecision, SecurityPolicyConfig, SeverityLevel } from '../types.js';
 
 export class MCPProxyGateway {
   private downstreamCmd: string;
@@ -12,11 +12,11 @@ export class MCPProxyGateway {
   private childProcess?: ChildProcess;
   private policyEngine: PolicyEngine;
 
-  constructor(commandString: string) {
+  constructor(commandString: string, customPolicy?: SecurityPolicyConfig) {
     const parts = commandString.trim().split(/\s+/);
     this.downstreamCmd = parts[0];
     this.downstreamArgs = parts.slice(1);
-    this.policyEngine = new PolicyEngine();
+    this.policyEngine = new PolicyEngine(customPolicy);
     AuditLedger.initialize();
   }
 
@@ -72,6 +72,17 @@ export class MCPProxyGateway {
         const toolName = msg.params?.name || 'unknown_tool';
         const toolArgs = msg.params?.arguments || {};
 
+        // Step-up tokens are supplied as a `confirmationToken` argument. Pull it
+        // out before anything else so it is never forwarded downstream to a
+        // server that has no business seeing an approval credential.
+        const confirmationToken =
+          typeof (toolArgs as Record<string, any>).confirmationToken === 'string'
+            ? ((toolArgs as Record<string, any>).confirmationToken as string)
+            : undefined;
+        if (confirmationToken) {
+          delete (toolArgs as Record<string, any>).confirmationToken;
+        }
+
         // 1. DLP Scan on inbound arguments
         const dlpScan = DLPScanner.scan(JSON.stringify(toolArgs), false);
 
@@ -79,7 +90,12 @@ export class MCPProxyGateway {
         const blastReport = BlastRadiusEngine.evaluate(JSON.stringify(toolArgs));
 
         // 3. Policy evaluation
-        const policyResult = this.policyEngine.evaluate(toolName, toolArgs, blastReport);
+        const policyResult = this.policyEngine.evaluate(
+          toolName,
+          toolArgs,
+          blastReport,
+          confirmationToken
+        );
 
         // 4. Record to cryptographic audit chain
         const audit = AuditLedger.record({
@@ -117,7 +133,7 @@ export class MCPProxyGateway {
             id: msg.id,
             error: {
               code: -32001,
-              message: `[BlastRadius Security Guard] High-impact action requires confirmation token. Danger Score: ${blastReport.dangerScore}. Reasons: ${policyResult.reasons.join(' | ')}`
+              message: `[BlastRadius Security Guard] High-impact action requires a step-up confirmation token. Danger Score: ${blastReport.dangerScore}. Reasons: ${policyResult.reasons.join(' | ')}. Retry this call with an extra "confirmationToken" argument issued by BlastRadius request_confirmation_token.`
             }
           };
           process.stdout.write(JSON.stringify(confirmResponse) + '\n');

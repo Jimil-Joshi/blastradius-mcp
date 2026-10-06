@@ -1,0 +1,45 @@
+# Keep the build context minimal and, more importantly, keep secrets and
+# local artifacts out of the image. Anything listed here is invisible to
+# `docker build`, so the Dockerfile can never COPY it.
+
+# Dependencies and build output: both are produced inside the image, and
+# copying a host `dist/` would risk shipping stale or platform-specific JS.
+node_modules/
+dist/
+
+# Version control and CI: not needed at runtime, and .git can leak history.
+.git/
+.gitignore
+.github/
+
+# Logs and the local audit ledger. blastradius-audit.jsonl is a
+# tamper-evident record of tool calls — it must never be baked into an image.
+*.log
+blastradius-audit.jsonl
+
+# Secrets and local environment overrides.
+.env
+.env.*
+
+# OS metadata.
+.DS_Store
+Thumbs.db
+
+# Tests are not shipped in the runtime image; the builder compiles src only.
+tests/
+evals/
+
+# Coverage output.
+coverage/
+*.lcov
+.nyc_output/
+
+# Editor and IDE directories.
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Version control and tooling metadata.
+.gitmodules
+.vscode-test/

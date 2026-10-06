@@ -1,22 +1,29 @@
 {
+  "_comment": "Claude Desktop config. Both entries use `npx -y blastradius-mcp` so nothing breaks when you move machines. Set a stable signing key in production so approval tokens and audit chains survive a restart.",
   "mcpServers": {
     "blastradius-security": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "C:\\\\Users\\\\Jim-per\\\\MCP's\\\\blastradius-mcp\\\\dist\\\\src\\\\index.js"
+        "-y",
+        "blastradius-mcp"
       ],
       "env": {
-        "BLAST_RADIUS_LICENSE_KEY": "COMMUNITY"
+        "BLAST_RADIUS_SIGNING_KEY": "replace-with-a-long-random-secret",
+        "BLAST_RADIUS_AUDIT_KEY": "replace-with-a-different-long-random-secret"
       }
     },
     "guarded-filesystem-proxy": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "C:\\\\Users\\\\Jim-per\\\\MCP's\\\\blastradius-mcp\\\\dist\\\\src\\\\index.js",
+        "-y",
+        "blastradius-mcp",
         "proxy",
         "--command",
-        "npx -y @modelcontextprotocol/server-filesystem C:\\\\workspace"
-      ]
+        "npx -y @modelcontextprotocol/server-filesystem /workspace"
+      ],
+      "env": {
+        "BLAST_RADIUS_SIGNING_KEY": "replace-with-a-long-random-secret"
+      }
     }
   }
 }

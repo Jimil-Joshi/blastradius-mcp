@@ -1,9 +1,11 @@
 {
+  "_comment": "Cursor config -> place at .cursor/mcp.json in your project.",
   "mcpServers": {
     "blastradius": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "C:/Users/Jim-per/MCP's/blastradius-mcp/dist/src/index.js"
+        "-y",
+        "blastradius-mcp"
       ]
     }
   }

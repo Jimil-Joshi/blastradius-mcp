@@ -1,0 +1,57 @@
+name: CodeQL
+
+# Static analysis for the TypeScript sources. blastradius-mcp is a security
+# boundary — it evaluates attacker-influenced commands, queries, and tool
+# payloads — so the alert list on the repository should show it being scanned
+# rather than being empty.
+#
+# The scheduled run keeps the database warm on quiet weeks; push and pull
+# request runs are what actually gate a merge.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Weekly, Mondays at 04:17 UTC. GitHub queues scheduled workflows, so an
+    # exact minute is not meaningful — this just avoids the top-of-hour rush.
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - javascript-typescript
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          language: ${{ matrix.language }}
+          # No autobuild step: javascript-typescript is an interpreted language,
+          # so CodeQL analyzes the checked-out sources directly.
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'

@@ -4,7 +4,13 @@ import * as path from 'node:path';
 import { ActionCategory, AuditEntry, PolicyDecision, SeverityLevel } from '../types.js';
 
 export class AuditLedger {
-  private static ledgerPath: string = path.join(process.cwd(), 'blastradius-audit.jsonl');
+  // BLAST_RADIUS_AUDIT_PATH overrides the default location. Without it the ledger
+  // lands in process.cwd(), which under a GUI client is whatever directory the app
+  // happened to be launched from. For a tamper-evident security record that is not
+  // an acceptable default, so the path is always worth setting explicitly.
+  private static ledgerPath: string =
+    process.env.BLAST_RADIUS_AUDIT_PATH ||
+    path.join(process.cwd(), 'blastradius-audit.jsonl');
   private static entries: AuditEntry[] = [];
   private static lastHash: string = '0'.repeat(64); // Genesis hash
   private static secretKey: string =
@@ -37,6 +43,45 @@ export class AuditLedger {
   /**
    * Append a new audit record to the cryptographic hash chain.
    */
+  /**
+   * The exact byte sequence the signature is computed over.
+   *
+   * Deliberately not JSON.stringify of the entry: key order and the optional
+   * `signature` field would make verification depend on serialisation details
+   * rather than on content.
+   */
+  private static canonicalBody(entry: {
+    index: number;
+    timestamp: string;
+    toolName: string;
+    callerId: string;
+    category: string;
+    decision: string;
+    dangerScore: number;
+    severity: string;
+    reasons: string[];
+    dlpFindingsCount: number;
+    inputHash: string;
+    prevHash: string;
+    currentHash: string;
+  }): string {
+    return [
+      entry.index,
+      entry.timestamp,
+      entry.toolName,
+      entry.callerId,
+      entry.category,
+      entry.decision,
+      entry.dangerScore,
+      entry.severity,
+      JSON.stringify(entry.reasons),
+      entry.dlpFindingsCount,
+      entry.inputHash,
+      entry.prevHash,
+      entry.currentHash
+    ].join(':');
+  }
+
   public static record(params: {
     toolName: string;
     callerId: string;
@@ -60,9 +105,34 @@ export class AuditLedger {
     const contentToHash = `${index}:${timestamp}:${params.toolName}:${params.callerId}:${params.decision}:${params.dangerScore}:${inputHash}:${prevHash}`;
     const currentHash = crypto.createHash('sha256').update(contentToHash).digest('hex');
 
+    // The signature covers the *whole* entry, not the chain hash.
+    //
+    // The chain hash above deliberately covers only the fields that participate in
+    // chain continuity. Signing `currentHash` alone therefore proved nothing about
+    // severity, category, reasons or dlpFindingsCount, even though a comment in
+    // this file once claimed it did. Those four fields are exactly what the
+    // sequence detector trusts, so an attacker could rewrite them, strip a signal,
+    // and verification would still report the entry intact.
+    //
+    // Signing the full canonical form closes that, because only a holder of the
+    // key can produce it.
     const signature = crypto
       .createHmac('sha256', this.secretKey)
-      .update(currentHash)
+      .update(this.canonicalBody({
+        index,
+        timestamp,
+        toolName: params.toolName,
+        callerId: params.callerId,
+        category: params.category,
+        decision: params.decision,
+        dangerScore: params.dangerScore,
+        severity: params.severity,
+        reasons: params.reasons,
+        dlpFindingsCount: params.dlpFindingsCount,
+        inputHash,
+        prevHash,
+        currentHash
+      }))
       .digest('hex');
 
     const entry: AuditEntry = {
@@ -84,6 +154,7 @@ export class AuditLedger {
 
     this.entries.push(entry);
     this.lastHash = currentHash;
+    this.writeHeadAnchor(entry);
 
     // Append to file asynchronously / safely
     try {
@@ -114,6 +185,19 @@ export class AuditLedger {
     for (let i = 0; i < list.length; i++) {
       const entry = list[i];
 
+      // 0. Genesis check. Removing entries from the *front* leaves a perfectly
+      // consistent chain, and the head anchor only records the tail, so without
+      // this an attacker can delete the earliest history and verification passes.
+      if (i === 0 && entry.prevHash !== '0'.repeat(64)) {
+        return {
+          intact: false,
+          totalEntries: this.entries.length,
+          verifiedCount: 0,
+          tamperedIndex: entry.index,
+          error: `Ledger does not begin at genesis. Entry ${entry.index} carries prevHash '${entry.prevHash.slice(0, 16)}...', so entries before it were removed or the file was rewritten.`
+        };
+      }
+
       // 1. Verify prevHash matches prior entry
       if (i > 0) {
         const prev = list[i - 1];
@@ -141,13 +225,87 @@ export class AuditLedger {
           error: `Tampered hash at index ${entry.index}. Expected '${expectedHash}', got '${entry.currentHash}'.`
         };
       }
+
+      // 3. Re-compute the HMAC over the full entry body.
+      //
+      // The chain hash covers continuity fields only, so this is the check that
+      // makes severity, category, reasons and dlpFindingsCount tamper-evident.
+      // Those four are unsigned by the chain hash, and the sequence detector reads
+      // all four.
+      const expectedSignature = crypto
+        .createHmac('sha256', this.secretKey)
+        .update(this.canonicalBody(entry))
+        .digest('hex');
+
+      const actualBuf = Buffer.from(entry.signature ?? '', 'utf-8');
+      const expectedBuf = Buffer.from(expectedSignature, 'utf-8');
+      if (
+        actualBuf.length !== expectedBuf.length ||
+        !crypto.timingSafeEqual(actualBuf, expectedBuf)
+      ) {
+        return {
+          intact: false,
+          totalEntries: this.entries.length,
+          verifiedCount: i,
+          tamperedIndex: entry.index,
+          error: `Signature mismatch at index ${entry.index}. An unsigned field (severity, category, reasons, or dlpFindingsCount) was altered after the entry was written, or the signing key does not match the one that wrote it.`
+        };
+      }
     }
 
+    // 4. Tail truncation check against the persisted head anchor.
+    //
+    // Deleting the last few entries is invisible to the chain: the remaining
+    // entries still verify, because nothing in them referenced what came after.
+    // Comparing against a separately-persisted anchor is what makes it visible.
+    const truncation = this.checkHeadAnchor(list);
+
     return {
-      intact: true,
+      intact: truncation === null,
       totalEntries: this.entries.length,
-      verifiedCount: list.length
+      verifiedCount: list.length,
+      error: truncation ?? undefined
     };
+  }
+
+  /**
+   * The anchor records the highest index and hash ever written. It lives in a
+   * separate file so that deleting ledger entries cannot delete the evidence that
+   * entries were deleted.
+   */
+  private static headAnchorPath(): string {
+    return `${this.ledgerPath}.anchor`;
+  }
+
+  private static writeHeadAnchor(entry: AuditEntry): void {
+    try {
+      fs.writeFileSync(
+        this.headAnchorPath(),
+        JSON.stringify({ index: entry.index, currentHash: entry.currentHash }),
+        'utf-8'
+      );
+    } catch {
+      // An unwritable anchor must not stop the ledger recording decisions.
+    }
+  }
+
+  private static checkHeadAnchor(list: AuditEntry[]): string | null {
+    if (list.length === 0) return null;
+    let anchor: { index: number; currentHash: string };
+    try {
+      anchor = JSON.parse(fs.readFileSync(this.headAnchorPath(), 'utf-8'));
+    } catch {
+      // No anchor yet, first run. Not evidence of tampering.
+      return null;
+    }
+    const last = list[list.length - 1];
+    if (last.index < anchor.index) {
+      return `Audit log has been truncated. Anchor expects at least ${anchor.index + 1} entries (last known hash ${anchor.currentHash.slice(0, 16)}...), found ${last.index + 1}.`;
+    }
+    if (last.index === anchor.index && last.currentHash !== anchor.currentHash) {
+      return `Head mismatch at index ${anchor.index}: anchor expects ${anchor.currentHash.slice(0, 16)}..., log contains ${last.currentHash.slice(0, 16)}...`;
+    }
+    return null;
   }
 
   public static getEntries(limit: number = 50): AuditEntry[] {

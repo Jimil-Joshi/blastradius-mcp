@@ -1,0 +1,104 @@
+{
+  "manifest_version": "0.3",
+  "name": "blastradius-mcp",
+  "display_name": "BlastRadius MCP (Zero-Trust Security Proxy)",
+  "version": "1.0.0",
+  "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
+  "long_description": "BlastRadius MCP is a local stdio Model Context Protocol server that sits between an AI agent and the tools it wants to call. Before anything executes, `simulate_action` scores the action (danger 0-100), estimates blast radius, and reports how reversible it would be. `inspect_payload_dlp` scans text, code, and logs for API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII, and returns a masked copy. `enforce_policy` is the central decision point: it evaluates a prospective tool call against a policy profile, DLP-scans the parameters, and appends a hash-chained audit entry. High-impact actions require an HMAC-SHA256 signed, time-bound step-up token minted by `request_confirmation_token`, which makes human approval non-repudiable. `verify_audit_log` re-walks the hash chain to detect tampering, deletions, or unauthorized edits, and `get_security_posture` reports live threat statistics, the active policy profile, and DLP redaction totals. The server is fully local: it opens no sockets, sends nothing to third parties, and has no license key or paid tier.",
+  "author": {
+    "name": "Jimil Joshi",
+    "url": "https://github.com/Jimil-Joshi"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jimil-Joshi/blastradius-mcp.git"
+  },
+  "homepage": "https://github.com/Jimil-Joshi/blastradius-mcp#readme",
+  "documentation": "https://github.com/Jimil-Joshi/blastradius-mcp#readme",
+  "support": "https://github.com/Jimil-Joshi/blastradius-mcp/issues",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/src/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/src/index.js",
+        "--policy=${user_config.policy_file}"
+      ],
+      "env": {
+        "BLAST_RADIUS_SIGNING_KEY": "${user_config.signing_key}",
+        "BLAST_RADIUS_AUDIT_KEY": "${user_config.audit_key}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "simulate_action",
+      "description": "Simulates and predicts the blast radius, danger score (0-100), and destructive reversibility of a shell command, SQL query, or cloud operation before execution."
+    },
+    {
+      "name": "inspect_payload_dlp",
+      "description": "Deep Data Loss Prevention (DLP) scanner. Detects, reports, and redacts API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII from prompts, code, and logs."
+    },
+    {
+      "name": "enforce_policy",
+      "description": "The central zero-trust decision point. Evaluates a prospective tool call against organizational security policies, scans parameters for DLP, and records a cryptographic audit trail."
+    },
+    {
+      "name": "request_confirmation_token",
+      "description": "Generates a time-bound, cryptographically signed (HMAC-SHA256) step-up approval token allowing an agent to execute high-impact actions when human consent is granted."
+    },
+    {
+      "name": "verify_audit_log",
+      "description": "Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications."
+    },
+    {
+      "name": "get_security_posture",
+      "description": "Returns current operational security metrics, the active policy profile, build edition and capabilities, blocked threat statistics, and DLP redaction totals."
+    }
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mcp-server",
+    "ai-security",
+    "agent-security",
+    "zero-trust",
+    "guardrails",
+    "blast-radius",
+    "dlp",
+    "prompt-injection",
+    "audit-trail",
+    "security-proxy"
+  ],
+  "license": "Apache-2.0",
+  "privacy_policies": [],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=22.0.0"
+    }
+  },
+  "user_config": {
+    "signing_key": {
+      "type": "string",
+      "title": "Approval Token Signing Key",
+      "description": "Optional HMAC-SHA256 secret used to sign step-up approval tokens. Leave blank to generate an ephemeral per-process key; approval tokens then stop validating when the server restarts.",
+      "sensitive": true,
+      "required": false
+    },
+    "audit_key": {
+      "type": "string",
+      "title": "Audit Ledger Hash Key",
+      "description": "Optional HMAC-SHA256 secret used to chain audit ledger entries. Leave blank to generate an ephemeral per-process key; previously written audit entries then fail verification.",
+      "sensitive": true,
+      "required": false
+    },
+    "policy_file": {
+      "type": "file",
+      "title": "Custom Security Policy File",
+      "description": "Optional path to a JSON security policy config, equivalent to the --policy CLI flag. Leave blank to use the built-in policy profiles.",
+      "required": false
+    }
+  }
+}

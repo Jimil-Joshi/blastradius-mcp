@@ -1,9 +1,11 @@
 {
+  "_comment": "VS Code / Git Copilot Chat config -> merge into your user settings.json.",
   "github.copilot.chat.mcp.servers": {
     "blastradius-security": {
-      "command": "node",
+      "command": "npx",
       "args": [
-        "C:/Users/Jim-per/MCP's/blastradius-mcp/dist/src/index.js"
+        "-y",
+        "blastradius-mcp"
       ]
     }
   }

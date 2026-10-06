@@ -2,7 +2,6 @@
 import * as fs from 'node:fs';
 import { BlastRadiusServer } from './server.js';
 import { MCPProxyGateway } from './proxy/mcpProxy.js';
-import { PolicyEngine } from './policy/policyEngine.js';
 import { SecurityPolicyConfig } from './types.js';
 
 function printHelp(): void {
@@ -21,9 +20,14 @@ Options:
   --version, -v           Show version information
 
 Environment Variables:
-  BLAST_RADIUS_LICENSE_KEY  License key for Pro or Enterprise features (ENT-..., PRO-...)
   BLAST_RADIUS_SIGNING_KEY  Custom secret for signing cryptographic approval tokens
-  BLAST_RADIUS_AUDIT_KEY    Custom secret for cryptographic audit log hash chaining
+  BLAST_RADIUS_AUDIT_KEY    Custom secret for signing audit ledger entries
+  BLAST_RADIUS_AUDIT_PATH   Where to write the audit ledger.
+                            Defaults to ./blastradius-audit.jsonl, which under a GUI
+                            client is the app's launch directory. Set this explicitly.
+
+  BlastRadius is Apache-2.0 licensed. There is no license key, no paid tier,
+  and no rate limit: every feature in this build is available without a key.
 
 Examples:
   # Run directly with Claude Desktop or Cursor:
@@ -82,13 +86,13 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
-    const gateway = new MCPProxyGateway(targetCommand);
+    const gateway = new MCPProxyGateway(targetCommand, customPolicy);
     gateway.start();
     return;
   }
 
   // Default: Run Standalone MCP Security Server
-  const server = new BlastRadiusServer();
+  const server = new BlastRadiusServer(customPolicy);
   await server.start();
 }
 

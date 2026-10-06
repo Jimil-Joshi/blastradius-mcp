@@ -23,12 +23,6 @@ export enum PolicyDecision {
   REQUIRE_CONFIRMATION = 'REQUIRE_CONFIRMATION'
 }
 
-export enum LicenseTier {
-  COMMUNITY = 'COMMUNITY',
-  PRO = 'PRO',
-  ENTERPRISE = 'ENTERPRISE'
-}
-
 export interface BlastRadiusReport {
   dangerScore: number; // 0 to 100
   severity: SeverityLevel;
@@ -39,6 +33,14 @@ export interface BlastRadiusReport {
   irreversible: boolean;
   rollbackFeasible: boolean;
   recommendedMitigations: string[];
+  /** What the shell will actually run, after quote removal and expansion. */
+  resolution?: {
+    resolvedCommand: string;
+    traits: string[];
+    hasPipeline: boolean;
+    interpreters: string[];
+    unresolvedVariables: string[];
+  };
   dryRunSimulation?: {
     simulatedOutput: string;
     estimatedCostDeltaUsd?: number;
@@ -86,6 +88,32 @@ export interface SecurityPolicyConfig {
   rules: PolicyRule[];
   allowedDirectories?: string[];
   protectedEnvironments?: string[];
+  /**
+   * Workflow-level analysis across the audit ledger, for multi-step attacks
+   * whose individual calls all pass. Omitted means enabled with defaults.
+   */
+  /**
+   * When true, the blast-radius engine may BLOCK on its own verdict and not only
+   * through an explicit rule.
+   *
+   * Set on the built-in zero-trust policy and off by default for custom policies,
+   * because a custom policy is an organisation's explicit statement about what its
+   * rules do and do not cover, and silently overriding a disabled rule would make
+   * `enabled: false` a lie.
+   *
+   * Without it, a structured payload whose command is spread across JSON fields
+   * (`{command:'rm', args:['-rf','/']}`) scores 100 CRITICAL while every
+   * text-matching rule passes, which is the one case text rules cannot reach.
+   */
+  engineCriticalBlocks?: boolean;
+
+  /** Optional sequence-detection thresholds. See `SequenceDetector`. */
+  sequence?: {
+    enabled?: boolean;
+    windowSize?: number;
+    destructiveBurstThreshold?: number;
+    probingThreshold?: number;
+  };
 }
 
 export interface AuditEntry {
@@ -122,7 +150,7 @@ export interface ApprovalToken {
 
 export interface SecurityPostureSummary {
   status: 'ACTIVE' | 'WARNING' | 'ALERT';
-  activeTier: LicenseTier;
+  edition: 'open-source';
   totalInvocations: number;
   blockedCount: number;
   dlpRedactionsCount: number;
