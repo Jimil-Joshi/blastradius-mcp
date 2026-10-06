@@ -33,6 +33,16 @@ export class WorktreeManager {
     baseBranch: string = 'HEAD',
     repoRoot?: string
   ): Promise<WorktreeResult> {
+    const branchRegex = /^[a-zA-Z0-9_./-]+$/;
+    if (
+      !branchRegex.test(branchName) ||
+      branchName.startsWith('-') ||
+      !branchRegex.test(baseBranch) ||
+      baseBranch.startsWith('-')
+    ) {
+      throw new Error(`Invalid branchName or baseBranch: git option injection detected.`);
+    }
+
     const root = path.resolve(repoRoot || process.cwd());
     const sanitizedAgentId = agentId.replace(/[^a-zA-Z0-9_-]/g, '_');
     const worktreesBase = path.join(root, '.blastradius', 'worktrees');

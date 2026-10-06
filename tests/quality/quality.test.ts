@@ -238,6 +238,26 @@ test('WorktreeManager - isolated worktree lifecycle operations', async () => {
   assert.strictEqual(secondCleanup.success, true);
 });
 
+test('WorktreeManager - rejects branchName or baseBranch with git option injection', async () => {
+  const manager = new WorktreeManager();
+  await assert.rejects(
+    () => manager.spawnWorktree('agent-opt-1', '--upload-pack=evil'),
+    /git option injection/i
+  );
+  await assert.rejects(
+    () => manager.spawnWorktree('agent-opt-2', '-b'),
+    /git option injection/i
+  );
+  await assert.rejects(
+    () => manager.spawnWorktree('agent-opt-3', 'valid_branch', '--output=/tmp/pwn'),
+    /git option injection/i
+  );
+  await assert.rejects(
+    () => manager.spawnWorktree('agent-opt-4', 'invalid;branch'),
+    /git option injection/i
+  );
+});
+
 test('AutomatedCodeCritique - flags empty catch blocks and swallowed errors', () => {
   const codeWithEmptyCatch = `
     try {

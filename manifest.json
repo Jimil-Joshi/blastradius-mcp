@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "blastradius-mcp",
   "display_name": "BlastRadius MCP (Zero-Trust Security Proxy)",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
   "long_description": "BlastRadius MCP is a local stdio Model Context Protocol server that sits between an AI agent and the tools it wants to call. Before anything executes, `simulate_action` scores the action (danger 0-100), estimates blast radius, and reports how reversible it would be. `inspect_payload_dlp` scans text, code, and logs for API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII, and returns a masked copy. `enforce_policy` is the central decision point: it evaluates a prospective tool call against a policy profile, DLP-scans the parameters, and appends a hash-chained audit entry. High-impact actions require an HMAC-SHA256 signed, time-bound step-up token minted by `request_confirmation_token`, which makes human approval non-repudiable. `verify_audit_log` re-walks the hash chain to detect tampering, deletions, or unauthorized edits, and `get_security_posture` reports live threat statistics, the active policy profile, and DLP redaction totals. The server is fully local: it opens no sockets, sends nothing to third parties, and has no license key or paid tier.",
   "author": {
@@ -33,72 +33,266 @@
   },
   "tools": [
     {
-      "name": "simulate_action",
-      "description": "Simulates and predicts the blast radius, danger score (0-100), and destructive reversibility of a shell command, SQL query, or cloud operation before execution.",
+      "name": "route_tool",
+      "description": "Semantic and keyword intent router. Resolves natural-language intent to optimal downstream MCP tools with JIT schema retrieval and >85% token reduction.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "commandOrQuery": {
+          "intent": {
             "type": "string",
-            "description": "The command, query, or script payload to simulate."
+            "description": "Intent or target tool to invoke."
           },
-          "actionType": {
+          "candidateServer": {
             "type": "string",
-            "enum": ["SHELL", "SQL", "CLOUD", "FILESYSTEM", "NETWORK", "GENERIC"],
-            "description": "Optional action category hint."
+            "description": "Optional server or namespace hint."
+          },
+          "executeImmediately": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether to execute if policy allows."
+          },
+          "toolArguments": {
+            "type": "object",
+            "description": "Arguments to pass to target tool."
+          }
+        },
+        "required": ["intent"]
+      }
+    },
+    {
+      "name": "virtualize_context",
+      "description": "Compresses large tool outputs, diffs, and logs into lightweight virtual handles, saving up to 90% agent context tokens.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rawContent": {
+            "type": "string",
+            "description": "Raw text, logs, or payload to virtualize."
+          },
+          "label": {
+            "type": "string",
+            "default": "payload",
+            "description": "Label for reference."
+          },
+          "retentionTtlSeconds": {
+            "type": "number",
+            "default": 3600,
+            "description": "TTL in seconds."
+          }
+        },
+        "required": ["rawContent"]
+      }
+    },
+    {
+      "name": "simulate_swarm_impact",
+      "description": "Fast in-memory pre-flight safety simulator. Spawns 25-50 adversarial virtual personas (Hacker, Confused User, Concurrency Racer, Data Corruptor) to stress-test diffs and commands in under 3 seconds.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetDiffOrCommand": {
+            "type": "string",
+            "description": "Code diff, command, or action to simulate."
+          },
+          "contextDescription": {
+            "type": "string",
+            "default": "",
+            "description": "Context description of the change."
+          },
+          "agentCount": {
+            "type": "number",
+            "default": 25,
+            "description": "Number of adversarial agents (5-50)."
+          },
+          "intensity": {
+            "type": "string",
+            "enum": ["FAST", "DEEP"],
+            "default": "FAST",
+            "description": "Simulation intensity."
+          },
+          "focusAreas": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["SECURITY", "CONCURRENCY", "USABILITY", "DATA_INTEGRITY"]
+            },
+            "description": "Focus areas for simulation."
+          }
+        },
+        "required": ["targetDiffOrCommand"]
+      }
+    },
+    {
+      "name": "adversarial_persona_review",
+      "description": "Deep targeted adversarial review executing specialized persona stress-testing (Hacker, Confused User, Legacy System, Concurrency Racer, Data Corruptor) with step-by-step reproduction steps.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetDiffOrCommand": {
+            "type": "string",
+            "description": "Code diff or action to review."
+          },
+          "personaType": {
+            "type": "string",
+            "enum": ["HACKER", "CONFUSED_USER", "LEGACY_SYSTEM", "CONCURRENCY_RACER", "DATA_CORRUPTOR", "ALL"],
+            "default": "ALL",
+            "description": "Adversarial persona type."
+          },
+          "depth": {
+            "type": "number",
+            "default": 3,
+            "description": "Review depth rounds (1-10)."
+          }
+        },
+        "required": ["targetDiffOrCommand"]
+      }
+    },
+    {
+      "name": "blast_radius_heatmap",
+      "description": "Visual Blast Radius Heatmap generator. Renders Markdown, ASCII, or JSON matrices evaluating impacted components, user classes, data sensitivity, and containment feasibility.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targetDiffOrCommand": {
+            "type": "string",
+            "description": "Code diff or command to generate blast radius heatmap for."
           },
           "context": {
             "type": "object",
-            "description": "Execution context such as environment (prod/stage), working directory, or target host."
+            "description": "Execution context."
+          },
+          "format": {
+            "type": "string",
+            "enum": ["ASCII", "MARKDOWN", "JSON"],
+            "default": "MARKDOWN",
+            "description": "Output presentation format."
           }
         },
-        "required": ["commandOrQuery"]
+        "required": ["targetDiffOrCommand"]
       }
     },
     {
-      "name": "inspect_payload_dlp",
-      "description": "Deep Data Loss Prevention (DLP) scanner. Detects, reports, and redacts API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII from prompts, code, and logs.",
+      "name": "enforce_tdd_state",
+      "description": "Strict Test-Driven Development (TDD) quality gate state machine. Enforces Red -> Green -> Refactor cycle before permitting production code modifications.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "content": {
+          "featureName": {
             "type": "string",
-            "description": "The raw text, code snippet, or log output to inspect."
+            "description": "Feature identifier being developed."
           },
-          "maskSensitive": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "GET_STATE",
+              "REGISTER_FAILING_TEST",
+              "VERIFY_TEST_FAILURE",
+              "VERIFY_TEST_PASS",
+              "RESET",
+              "CHECK_PERMISSION"
+            ],
+            "description": "TDD state action."
+          },
+          "testFilePath": {
+            "type": "string",
+            "description": "Path to the test file."
+          },
+          "targetFilePath": {
+            "type": "string",
+            "description": "Path to target production code file when checking write permissions."
+          },
+          "testOutput": {
+            "type": "string",
+            "description": "Output of test execution."
+          }
+        },
+        "required": ["featureName", "action"]
+      }
+    },
+    {
+      "name": "generate_socratic_spec",
+      "description": "Socratic requirement specification generator. Decomposes informal engineering requirements into rigorous, testable contracts with invariants, edge cases, and RED test plans.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "featureRequirement": {
+            "type": "string",
+            "description": "Feature requirement or user story."
+          },
+          "targetComponents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of affected components."
+          },
+          "depth": {
+            "type": "string",
+            "enum": ["HIGH_LEVEL", "DETAILED", "EXHAUSTIVE"],
+            "default": "DETAILED",
+            "description": "Spec detail depth."
+          }
+        },
+        "required": ["featureRequirement"]
+      }
+    },
+    {
+      "name": "spawn_worktree_subagent",
+      "description": "Isolates subagents in parallel Git worktrees (.blastradius/worktrees/<agentId>) to prevent workspace contamination and race conditions.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "description": "Unique agent identifier."
+          },
+          "branchName": {
+            "type": "string",
+            "description": "Branch name for worktree."
+          },
+          "baseBranch": {
+            "type": "string",
+            "default": "main",
+            "description": "Base branch to branch off of."
+          }
+        },
+        "required": ["agentId", "branchName"]
+      }
+    },
+    {
+      "name": "automated_code_critique",
+      "description": "Senior-developer static and AST code critique. Detects silent error swallowing, dangerous sinks, missing test assertions, unchecked inputs, and unbounded queries.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "diffOrCode": {
+            "type": "string",
+            "description": "Code diff or content to critique."
+          },
+          "filePath": {
+            "type": "string",
+            "description": "Optional file path hint."
+          },
+          "strictSecurity": {
             "type": "boolean",
             "default": true,
-            "description": "Whether to return a sanitized version with credentials and PII masked."
+            "description": "Enable strict security heuristic checks."
           }
         },
-        "required": ["content"]
+        "required": ["diffOrCode"]
       }
     },
     {
-      "name": "enforce_policy",
-      "description": "The central zero-trust decision point. Evaluates a prospective tool call against organizational security policies, scans parameters for DLP, and records a cryptographic audit trail.",
+      "name": "verify_audit_log",
+      "description": "Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "toolName": {
-            "type": "string",
-            "description": "The name of the target tool intended to be called."
-          },
-          "parameters": {
-            "type": "object",
-            "description": "The parameters intended to be passed to the tool."
-          },
-          "callerId": {
-            "type": "string",
-            "default": "agent-client",
-            "description": "Unique identifier for the calling agent or user."
-          },
-          "confirmationToken": {
-            "type": "string",
-            "description": "Optional cryptographically signed approval token for elevated destructive actions."
+          "limit": {
+            "type": "number",
+            "default": 100,
+            "description": "Number of recent audit records to verify."
           }
-        },
-        "required": ["toolName", "parameters"]
+        }
       }
     },
     {
@@ -133,25 +327,17 @@
       }
     },
     {
-      "name": "verify_audit_log",
-      "description": "Cryptographically verifies the immutable hash-chained audit ledger to detect tampering, deleted records, or unauthorized log modifications.",
+      "name": "get_security_posture",
+      "description": "Returns real-time security posture score (0-100), active policy status, compliance metrics, TDD state summary, and data flywheel learning telemetry.",
       "inputSchema": {
         "type": "object",
         "properties": {
-          "limit": {
-            "type": "number",
-            "default": 100,
-            "description": "Number of recent audit records to verify."
+          "includeHistory": {
+            "type": "boolean",
+            "default": false,
+            "description": "Include historical trend summary."
           }
         }
-      }
-    },
-    {
-      "name": "get_security_posture",
-      "description": "Returns current operational security metrics, the active policy profile, build edition and capabilities, blocked threat statistics, and DLP redaction totals.",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
       }
     }
   ],

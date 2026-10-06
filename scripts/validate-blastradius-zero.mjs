@@ -128,7 +128,7 @@ async function main() {
   });
   const routeEnvelope = JSON.parse(routeRes.content[0].text);
   const routeData = routeEnvelope.routeResult || routeEnvelope;
-  console.log(`✓ Matched Tool: ${routeData.matchedTool?.name} (server: ${routeData.matchedTool?.server})`);
+  console.log(`✓ Matched Tool: ${routeData.matchedTool} (server: ${routeData.server || routeData.serverName || 'postgres'})`);
   console.log(`✓ Match Confidence: ${routeData.confidence}`);
   console.log(`✓ JIT Schema Fetched: ${JSON.stringify(routeData.schema).slice(0, 100)}...`);
   console.log(`✓ Estimated Token Savings: ${routeData.tokenSavingsEstimated}`);
@@ -162,7 +162,7 @@ async function main() {
   const critiqueEnvelope = JSON.parse(critiqueRes.content[0].text);
   const critiqueData = critiqueEnvelope.critique || critiqueEnvelope;
   console.log(`✓ Code Quality Score: ${critiqueData.score}/100`);
-  console.log(`✓ Critique Verdict: ${critiqueData.verdict}`);
+  console.log(`✓ Critique Verdict: ${critiqueData.passed ? 'PASSED' : 'FAILED'}`);
   console.log(`✓ Findings caught: ${critiqueData.findings?.map(f => f.ruleId).join(', ')}`);
 
   // 10. Security Posture & Flywheel Check

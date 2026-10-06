@@ -228,8 +228,16 @@ export const BlastRadiusHeatmapSchema = z.object({
 
 export const EnforceTddStateSchema = z.object({
   featureName: z.string().describe('Feature identifier being developed'),
-  action: z.enum(['GET_STATE', 'REGISTER_FAILING_TEST', 'VERIFY_TEST_FAILURE', 'VERIFY_TEST_PASS', 'RESET']).describe('TDD state action'),
+  action: z.enum([
+    'GET_STATE',
+    'REGISTER_FAILING_TEST',
+    'VERIFY_TEST_FAILURE',
+    'VERIFY_TEST_PASS',
+    'RESET',
+    'CHECK_PERMISSION'
+  ]).describe('TDD state action'),
   testFilePath: z.string().optional().describe('Path to the test file'),
+  targetFilePath: z.string().optional().describe('Path to the target production code file'),
   testOutput: z.string().optional().describe('Output of test execution')
 });
 

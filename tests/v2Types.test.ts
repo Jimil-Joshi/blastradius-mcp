@@ -137,12 +137,13 @@ test('Zod Schemas - BlastRadiusHeatmapSchema validates formats and defaults', ()
 });
 
 test('Zod Schemas - EnforceTddStateSchema validates TDD actions and fields', () => {
-  const actions = ['GET_STATE', 'REGISTER_FAILING_TEST', 'VERIFY_TEST_FAILURE', 'VERIFY_TEST_PASS', 'RESET'] as const;
+  const actions = ['GET_STATE', 'REGISTER_FAILING_TEST', 'VERIFY_TEST_FAILURE', 'VERIFY_TEST_PASS', 'RESET', 'CHECK_PERMISSION'] as const;
   for (const action of actions) {
     const res = EnforceTddStateSchema.parse({
       featureName: 'auth-token',
       action,
       testFilePath: 'tests/auth.test.ts',
+      targetFilePath: 'src/auth.ts',
       testOutput: 'AssertionError: expected true'
     });
     assert.strictEqual(res.featureName, 'auth-token');

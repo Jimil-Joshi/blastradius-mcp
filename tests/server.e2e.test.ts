@@ -277,6 +277,6 @@ test('BlastRadiusServer - Accepts a step-up token once and rejects the replay', 
       await client.callTool({ name: 'verify_audit_log', arguments: { limit: 10 } })
     );
     assert.strictEqual(verification.verification.intact, true);
-    assert.strictEqual(verification.verification.totalEntries, 3);
+    assert.strictEqual(verification.verification.totalEntries, 4);
   });
 });

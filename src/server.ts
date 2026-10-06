@@ -349,12 +349,23 @@ export class BlastRadiusServer {
                 },
                 action: {
                   type: 'string',
-                  enum: ['GET_STATE', 'REGISTER_FAILING_TEST', 'VERIFY_TEST_FAILURE', 'VERIFY_TEST_PASS', 'RESET'],
+                  enum: [
+                    'GET_STATE',
+                    'REGISTER_FAILING_TEST',
+                    'VERIFY_TEST_FAILURE',
+                    'VERIFY_TEST_PASS',
+                    'RESET',
+                    'CHECK_PERMISSION'
+                  ],
                   description: 'TDD state action.'
                 },
                 testFilePath: {
                   type: 'string',
                   description: 'Path to the test file.'
+                },
+                targetFilePath: {
+                  type: 'string',
+                  description: 'Path to target production code file when checking write permissions.'
                 },
                 testOutput: {
                   type: 'string',
@@ -517,6 +528,19 @@ export class BlastRadiusServer {
           case 'route_tool': {
             const parsed = RouteToolSchema.parse(args);
             const routeResult = await semanticRouter.route(parsed);
+
+            if (parsed.executeImmediately && routeResult.executed) {
+              this.dualWriteAuditEvent({
+                toolName: routeResult.matchedTool || 'route_tool',
+                callerId: 'semantic-router',
+                category: ActionCategory.GENERIC,
+                decision: PolicyDecision.ALLOW,
+                dangerScore: 0,
+                severity: SeverityLevel.SAFE,
+                reasons: [routeResult.reasoning || `Executed immediately via semantic router`],
+                rawPayload: parsed.toolArguments
+              });
+            }
 
             return {
               content: [
@@ -699,6 +723,13 @@ export class BlastRadiusServer {
                 actionResult = tddStateMachine.getState(parsed.featureName);
                 break;
               }
+              case 'CHECK_PERMISSION': {
+                actionResult = tddStateMachine.canModifyProductionCode(
+                  parsed.featureName,
+                  parsed.targetFilePath || ''
+                );
+                break;
+              }
             }
 
             return {
@@ -828,6 +859,17 @@ export class BlastRadiusServer {
               parsed.ttlSeconds,
               parsed.reason
             );
+
+            this.dualWriteAuditEvent({
+              toolName: 'request_confirmation_token',
+              callerId: parsed.requestedBy,
+              category: ActionCategory.GENERIC,
+              decision: PolicyDecision.REQUIRE_CONFIRMATION,
+              dangerScore: 0,
+              severity: SeverityLevel.SAFE,
+              reasons: [parsed.reason || `Token issued for ${parsed.toolName}`],
+              rawPayload: parsed
+            });
 
             return {
               content: [

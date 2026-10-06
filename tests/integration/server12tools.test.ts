@@ -479,3 +479,102 @@ test('BlastRadius-Zero Server - Maintains legacy tool support and dual-writes te
     await cleanup();
   }
 });
+
+test('BlastRadius-Zero Server - Tool 6: enforce_tdd_state handles CHECK_PERMISSION', async () => {
+  const { client, cleanup } = await createServerClientPair();
+  try {
+    // Under IDLE state, modifying production code is forbidden
+    const checkIdle = await client.callTool({
+      name: 'enforce_tdd_state',
+      arguments: {
+        featureName: 'checkout-v2',
+        action: 'CHECK_PERMISSION',
+        targetFilePath: 'src/checkout.ts'
+      }
+    });
+    const parsedIdle = parseJson(checkIdle);
+    assert.strictEqual(parsedIdle.status, 'SUCCESS');
+    assert.strictEqual(parsedIdle.action, 'CHECK_PERMISSION');
+    assert.strictEqual(parsedIdle.result.allowed, false);
+
+    // Modifying test code is always permitted
+    const checkTest = await client.callTool({
+      name: 'enforce_tdd_state',
+      arguments: {
+        featureName: 'checkout-v2',
+        action: 'CHECK_PERMISSION',
+        targetFilePath: 'tests/checkout.test.ts'
+      }
+    });
+    const parsedTest = parseJson(checkTest);
+    assert.strictEqual(parsedTest.result.allowed, true);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('BlastRadius-Zero Server - Tool 11: request_confirmation_token dual-writes audit event', async () => {
+  const { client, cleanup } = await createServerClientPair();
+  try {
+    const rawResult = await client.callTool({
+      name: 'request_confirmation_token',
+      arguments: {
+        toolName: 'drop_database',
+        actionFingerprint: 'fp-12345',
+        requestedBy: 'admin-lead',
+        ttlSeconds: 300,
+        reason: 'Authorized DB reset'
+      }
+    });
+    const parsed = parseJson(rawResult);
+    assert.strictEqual(parsed.status, 'TOKEN_ISSUED');
+
+    const auditVerification = AuditLedger.verifyIntegrity(10);
+    assert.strictEqual(auditVerification.intact, true);
+    const entries = AuditLedger.getEntries(10);
+    const tokenAudit = entries.find((e) => e.toolName === 'request_confirmation_token' && e.callerId === 'admin-lead');
+    assert.ok(tokenAudit, 'Audit ledger must contain request_confirmation_token event');
+    assert.strictEqual(tokenAudit.callerId, 'admin-lead');
+    assert.strictEqual(tokenAudit.category, 'GENERIC');
+  } finally {
+    await cleanup();
+  }
+});
+
+test('BlastRadius-Zero Server - Tool 1: route_tool with executeImmediately dual-writes audit event', async () => {
+  const { client, cleanup } = await createServerClientPair();
+  try {
+    const rawResult = await client.callTool({
+      name: 'route_tool',
+      arguments: {
+        intent: 'query user records from postgres',
+        executeImmediately: true,
+        toolArguments: { sql: 'SELECT 1' }
+      }
+    });
+    const parsed = parseJson(rawResult);
+    assert.strictEqual(parsed.status, 'SUCCESS');
+    assert.strictEqual(parsed.routeResult.executed, true);
+
+    const auditVerification = AuditLedger.verifyIntegrity(10);
+    assert.strictEqual(auditVerification.intact, true);
+    const entries = AuditLedger.getEntries(10);
+    const routedAudit = entries.find((e) => e.toolName === parsed.routeResult.matchedTool);
+    assert.ok(routedAudit, `Audit ledger must contain event for routed tool ${parsed.routeResult.matchedTool}`);
+  } finally {
+    await cleanup();
+  }
+});
+
+test('Metadata Synchronization - package.json and manifest.json declare 2.0.0 and 12 tools', () => {
+  const root = path.resolve(import.meta.dirname, '../../..');
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'));
+  const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf-8'));
+
+  assert.strictEqual(pkg.version, '2.0.0', 'package.json version must be 2.0.0');
+  assert.strictEqual(manifest.version, '2.0.0', 'manifest.json version must be 2.0.0');
+  assert.strictEqual(manifest.tools.length, 12, 'manifest.json must declare all 12 tools');
+
+  const manifestToolNames = manifest.tools.map((t: any) => t.name).sort();
+  assert.deepStrictEqual(manifestToolNames, EXPECTED_12_TOOLS, 'manifest.json tools must match 12 v2.0 tools');
+});
