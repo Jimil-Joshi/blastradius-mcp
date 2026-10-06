@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "blastradius-mcp",
   "display_name": "BlastRadius MCP (Zero-Trust Security Proxy)",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
   "long_description": "BlastRadius MCP is a local stdio Model Context Protocol server that sits between an AI agent and the tools it wants to call. Before anything executes, `simulate_action` scores the action (danger 0-100), estimates blast radius, and reports how reversible it would be. `inspect_payload_dlp` scans text, code, and logs for API keys, passwords, JWTs, cloud credentials, credit cards, SSNs, and PII, and returns a masked copy. `enforce_policy` is the central decision point: it evaluates a prospective tool call against a policy profile, DLP-scans the parameters, and appends a hash-chained audit entry. High-impact actions require an HMAC-SHA256 signed, time-bound step-up token minted by `request_confirmation_token`, which makes human approval non-repudiable. `verify_audit_log` re-walks the hash chain to detect tampering, deletions, or unauthorized edits, and `get_security_posture` reports live threat statistics, the active policy profile, and DLP redaction totals. The server is fully local: it opens no sockets, sends nothing to third parties, and has no license key or paid tier.",
   "author": {
