@@ -138,7 +138,7 @@ export class BlastRadiusServer {
 
   private async runPersonaReview(
     targetDiffOrCommand: string,
-    personaType: 'HACKER' | 'CONFUSED_USER' | 'LEGACY_SYSTEM' | 'CONCURRENCY_RACER' | 'ALL',
+    personaType: 'HACKER' | 'CONFUSED_USER' | 'LEGACY_SYSTEM' | 'CONCURRENCY_RACER' | 'DATA_CORRUPTOR' | 'ALL',
     depth: number
   ): Promise<PersonaFinding[]> {
     const personas: AdversarialPersona[] = [];
@@ -155,7 +155,7 @@ export class BlastRadiusServer {
     if (personaType === 'CONCURRENCY_RACER' || personaType === 'ALL') {
       personas.push(createConcurrencyRacerPersona('racer-review-01'));
     }
-    if (personaType === 'ALL') {
+    if (personaType === 'DATA_CORRUPTOR' || personaType === 'ALL') {
       personas.push(createDataCorruptorPersona('corruptor-review-01'));
     }
 
@@ -298,7 +298,7 @@ export class BlastRadiusServer {
                 },
                 personaType: {
                   type: 'string',
-                  enum: ['HACKER', 'CONFUSED_USER', 'LEGACY_SYSTEM', 'CONCURRENCY_RACER', 'ALL'],
+                  enum: ['HACKER', 'CONFUSED_USER', 'LEGACY_SYSTEM', 'CONCURRENCY_RACER', 'DATA_CORRUPTOR', 'ALL'],
                   default: 'ALL',
                   description: 'Adversarial persona type.'
                 },

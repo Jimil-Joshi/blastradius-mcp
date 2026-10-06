@@ -216,7 +216,7 @@ export const SimulateSwarmImpactSchema = z.object({
 
 export const AdversarialPersonaReviewSchema = z.object({
   targetDiffOrCommand: z.string().describe('Code diff or action to review'),
-  personaType: z.enum(['HACKER', 'CONFUSED_USER', 'LEGACY_SYSTEM', 'CONCURRENCY_RACER', 'ALL']).default('ALL').describe('Adversarial persona type'),
+  personaType: z.enum(['HACKER', 'CONFUSED_USER', 'LEGACY_SYSTEM', 'CONCURRENCY_RACER', 'DATA_CORRUPTOR', 'ALL']).default('ALL').describe('Adversarial persona type'),
   depth: z.number().min(1).max(10).default(3).describe('Review depth rounds')
 });
 
