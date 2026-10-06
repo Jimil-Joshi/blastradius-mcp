@@ -24,22 +24,29 @@ export class SwarmNativeEngine {
     // 1. Spawn requested personas
     const personas = generatePersonas(agentCount, request.focusAreas);
 
-    // 2. Round 1: Individual Persona Evaluations
-    const rawFindings: PersonaFinding[] = [];
-    for (const persona of personas) {
-      const personaResults = await persona.evaluate(targetDiff, {
-        contextDescription: request.contextDescription,
-        round: 1
-      });
-      if (Array.isArray(personaResults)) {
-        rawFindings.push(...personaResults);
-      }
-    }
+    // 2. Round 1: Individual Persona Evaluations (in parallel)
+    const evaluationResults = await Promise.all(
+      personas.map(p =>
+        p.evaluate(targetDiff, {
+          contextDescription: request.contextDescription,
+          round: 1
+        })
+      )
+    );
+    const rawFindings: PersonaFinding[] = evaluationResults.flat();
 
     // 3. Round 2: Multi-Round Cross-Vector Synthesis
     // Detect compound risks (e.g. Concurrency + Auth or Injection + Usability)
-    const hasAuthIssues = rawFindings.some(f => f.affectedEntity === 'Auth' || f.attackVector === 'AUTH_BYPASS');
-    const hasRaceConditions = rawFindings.some(f => f.attackVector === 'CONCURRENT_TOKEN_REFRESH' || f.attackVector === 'TOCTOU_RACE_CONDITION');
+    const hasAuthIssues = rawFindings.some(
+      f =>
+        f.attackVector === 'AUTH_BYPASS' ||
+        f.attackVector === 'PRIVILEGE_ESCALATION' ||
+        f.attackVector === 'IDOR' ||
+        f.attackVector === 'TOKEN_TAMPERING'
+    );
+    const hasRaceConditions = rawFindings.some(
+      f => f.attackVector === 'CONCURRENT_TOKEN_REFRESH' || f.attackVector === 'TOCTOU_RACE_CONDITION'
+    );
 
     if (hasAuthIssues && hasRaceConditions) {
       const compoundExists = rawFindings.some(f => f.attackVector === 'COMPOUND_AUTH_RACE');
@@ -171,3 +178,4 @@ export class SwarmNativeEngine {
     return Math.min(100, Math.max(5, Math.round(score * 0.6 + boost)));
   }
 }
+

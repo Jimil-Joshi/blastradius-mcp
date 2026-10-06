@@ -3,12 +3,14 @@ import { createHackerPersona } from './hackerPersona.js';
 import { createConfusedUserPersona } from './confusedUser.js';
 import { createLegacySystemPersona } from './legacySystem.js';
 import { createConcurrencyRacerPersona } from './concurrencyRacer.js';
+import { createDataCorruptorPersona } from './dataCorruptorPersona.js';
 
 export {
   createHackerPersona,
   createConfusedUserPersona,
   createLegacySystemPersona,
-  createConcurrencyRacerPersona
+  createConcurrencyRacerPersona,
+  createDataCorruptorPersona
 };
 
 type PersonaFactory = (id: string) => AdversarialPersona;
@@ -44,6 +46,12 @@ const PERSONA_CATALOG: PersonaMeta[] = [
     focusArea: 'DATA_INTEGRITY',
     factory: createLegacySystemPersona,
     prefix: 'legacy'
+  },
+  {
+    type: 'DATA_CORRUPTOR',
+    focusArea: 'DATA_INTEGRITY',
+    factory: createDataCorruptorPersona,
+    prefix: 'corruptor'
   }
 ];
 
@@ -72,3 +80,4 @@ export function generatePersonas(count: number, focusAreas?: string[]): Adversar
 
   return personas;
 }
+

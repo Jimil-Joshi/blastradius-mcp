@@ -27,7 +27,12 @@ export function generateHeatmap(
   for (const finding of findings) {
     let targetComponent: StandardComponent = 'APIs';
 
-    if (finding.affectedEntity === 'Database' || finding.attackVector === 'SQL_INJECTION' || finding.attackVector === 'TOCTOU_RACE_CONDITION') {
+    if (
+      finding.affectedEntity === 'Database' ||
+      finding.attackVector === 'SQL_INJECTION' ||
+      finding.attackVector === 'TOCTOU_RACE_CONDITION' ||
+      finding.attackVector === 'TYPE_CONFUSION_INJECTION'
+    ) {
       targetComponent = 'Database';
     } else if (
       finding.affectedEntity === 'Auth' ||
@@ -35,10 +40,16 @@ export function generateHeatmap(
       finding.attackVector === 'IDOR' ||
       finding.attackVector === 'PRIVILEGE_ESCALATION' ||
       finding.attackVector === 'TOKEN_TAMPERING' ||
-      finding.attackVector === 'CONCURRENT_TOKEN_REFRESH'
+      finding.attackVector === 'CONCURRENT_TOKEN_REFRESH' ||
+      finding.attackVector === 'UNICODE_HOMOGLYPH_COLLISION'
     ) {
       targetComponent = 'Auth';
-    } else if (finding.affectedEntity === 'Filesystem' || finding.attackVector === 'SHELL_INJECTION' || finding.attackVector === 'COMMAND_INJECTION') {
+    } else if (
+      finding.affectedEntity === 'Filesystem' ||
+      finding.attackVector === 'SHELL_INJECTION' ||
+      finding.attackVector === 'COMMAND_INJECTION' ||
+      finding.attackVector === 'NULL_BYTE_POISONING'
+    ) {
       targetComponent = 'Filesystem';
     } else if (finding.affectedEntity === 'Network' || finding.attackVector === 'SOCKET_TIMEOUT_HANG') {
       targetComponent = 'Network';
@@ -301,3 +312,4 @@ export function renderHeatmapMarkdown(matrix: HeatmapMatrix): string {
 
   return md.join('\n');
 }
+

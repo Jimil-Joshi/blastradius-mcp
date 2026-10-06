@@ -14,11 +14,12 @@ export function createConfusedUserPersona(id = 'confused-01'): AdversarialPerson
     focusArea: 'USABILITY',
     evaluate(diffOrCommand: string, _context?: Record<string, any>): PersonaFinding[] {
       const findings: PersonaFinding[] = [];
+      const cleanCode = diffOrCommand.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
       // 1. Unhandled Undefined / Missing Optional Chaining
-      // Detects deep property access chain on req.body or arbitrary objects without ?.
-      const deepPropertyRegex = /(?:req\.body|\w+)\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/g;
-      const matches = diffOrCommand.match(deepPropertyRegex) || [];
+      // Anchored to untrusted payload roots: req.body, req.query, payload, input, data, etc.
+      const deepPropertyRegex = /(?:req\.(?:body|query|params)|payload|input|data|params)\.[a-zA-Z0-9_]+\.[a-zA-Z0-9_]+/g;
+      const matches = cleanCode.match(deepPropertyRegex) || [];
       const hasUnprotectedDeepAccess = matches.some(m => !m.includes('?.'));
 
       if (hasUnprotectedDeepAccess) {
@@ -37,8 +38,8 @@ export function createConfusedUserPersona(id = 'confused-01'): AdversarialPerson
       }
 
       // 2. Unprotected JSON.parse
-      const hasJsonParse = /JSON\.parse\s*\(/i.test(diffOrCommand);
-      const hasTryCatch = /try\s*\{[\s\S]*?JSON\.parse[\s\S]*?\}\s*catch/i.test(diffOrCommand);
+      const hasJsonParse = /JSON\.parse\s*\(/i.test(cleanCode);
+      const hasTryCatch = /try\s*\{[\s\S]*?JSON\.parse[\s\S]*?\}\s*catch/i.test(cleanCode);
 
       if (hasJsonParse && !hasTryCatch) {
         findings.push({
@@ -58,10 +59,10 @@ export function createConfusedUserPersona(id = 'confused-01'): AdversarialPerson
 
       // 3. Missing Idempotency on Critical Mutations
       const isCriticalMutation =
-        /(?:charge|payment|checkout|transfer|order|deduct)\b/i.test(diffOrCommand) &&
-        /(?:app\.post|router\.post|chargeCreditCard|createOrder|deduct)/i.test(diffOrCommand);
+        /(?:charge|payment|checkout|transfer|order|deduct)\b/i.test(cleanCode) &&
+        /(?:app\.post|router\.post|chargeCreditCard|createOrder|deduct)/i.test(cleanCode);
 
-      const hasIdempotency = /idempotenc|x-idempotency-key|transactionId|clientNonce/i.test(diffOrCommand);
+      const hasIdempotency = /idempotenc|x-idempotency-key|transactionId|clientNonce/i.test(cleanCode);
 
       if (isCriticalMutation && !hasIdempotency) {
         findings.push({
@@ -79,13 +80,14 @@ export function createConfusedUserPersona(id = 'confused-01'): AdversarialPerson
         });
       }
 
-      // 4. Boundary Violation (e.g. Negative values / Unbounded Numbers)
+      // 4. Boundary Violation (e.g. Negative values / Unbounded Numbers in financial context)
       const hasUnboundedNumber =
-        /(?:balance\s*-=\s*amount|balance\s*-\s*amount|\bamount\b[\s\S]*?balance)/i.test(diffOrCommand) ||
-        /(?:transfer|withdraw)\b/i.test(diffOrCommand);
+        /(?:balance\s*[-=]\s*amount|\bamount\b[\s\S]*?balance)/i.test(cleanCode) ||
+        /(?:transfer|withdraw)\w*\s*\([^)]*amount/i.test(cleanCode) ||
+        /(?:transfer|withdraw)\b[\s\S]*?\b(?:amount|balance|funds|quantity)\b/i.test(cleanCode);
 
       const hasPositiveGuard =
-        /(?:amount\s*<=\s*0|amount\s*<\s*0|if\s*\([^)]*amount\s*>\s*0\)|typeof amount !== ['"]number['"])/i.test(diffOrCommand);
+        /(?:amount\s*<=\s*0|amount\s*<\s*0|if\s*\([^)]*amount\s*>\s*0\)|typeof amount !== ['"]number['"])/i.test(cleanCode);
 
       if (hasUnboundedNumber && !hasPositiveGuard) {
         findings.push({
@@ -106,3 +108,4 @@ export function createConfusedUserPersona(id = 'confused-01'): AdversarialPerson
     }
   };
 }
+

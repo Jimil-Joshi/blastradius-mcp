@@ -13,12 +13,13 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
     focusArea: 'SECURITY',
     evaluate(diffOrCommand: string, _context?: Record<string, any>): PersonaFinding[] {
       const findings: PersonaFinding[] = [];
+      const cleanCode = diffOrCommand.replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
       // 1. SQL Injection Detection
       const hasSqlConcat =
-        /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]*?\${/i.test(diffOrCommand) ||
-        /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]*?\+[\s\S]*?['"`]/i.test(diffOrCommand) ||
-        /(?:query|execute|raw)\s*\(\s*(['"`][^'"`]*?\+[\s\S]*?|`[^`]*?\${)/i.test(diffOrCommand);
+        /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]*?\${/i.test(cleanCode) ||
+        /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]*?\+[\s\S]*?['"`]/i.test(cleanCode) ||
+        /(?:query|execute|raw)\s*\(\s*(['"`][^'"`]*?\+[\s\S]*?|`[^`]*?\${)/i.test(cleanCode);
 
       if (hasSqlConcat) {
         findings.push({
@@ -38,12 +39,12 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
 
       // 2. Auth Bypass Detection
       const hasAuthBypass =
-        /x-bypass-auth/i.test(diffOrCommand) ||
-        /\bskipAuth\b/i.test(diffOrCommand) ||
-        /\bauth\s*:\s*false\b/i.test(diffOrCommand) ||
-        /\b(?:bypassAuth|disableAuth|skip_auth)\b/i.test(diffOrCommand) ||
-        /if\s*\([^)]*(?:bypass|skipAuth|noAuth|admin-override)[^)]*\)\s*(?:return|next)/i.test(diffOrCommand) ||
-        /req\.headers\['x-admin-override'\]/i.test(diffOrCommand);
+        /x-bypass-auth/i.test(cleanCode) ||
+        /\bskipAuth\b/i.test(cleanCode) ||
+        /\bauth\s*:\s*false\b/i.test(cleanCode) ||
+        /\b(?:bypassAuth|disableAuth|skip_auth)\b/i.test(cleanCode) ||
+        /if\s*\([^)]*(?:bypass|skipAuth|noAuth|admin-override)[^)]*\)\s*(?:return|next)/i.test(cleanCode) ||
+        /req\.headers\['x-admin-override'\]/i.test(cleanCode);
 
       if (hasAuthBypass) {
         findings.push({
@@ -63,10 +64,10 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
 
       // 3. IDOR (Insecure Direct Object Reference) Detection
       const hasIdor =
-        /(?:findById|findOne|find)\s*\(\s*req\.params\.\w+\s*\)/i.test(diffOrCommand) ||
-        /\/api\/(?:documents|accounts|orders|users|profiles)\/:(\w+)[\s\S]*?(?:res\.json|return)/i.test(diffOrCommand);
+        /(?:findById|findOne|find)\s*\(\s*req\.params\.\w+\s*\)/i.test(cleanCode) ||
+        /\/api\/(?:documents|accounts|orders|users|profiles)\/:(\w+)[\s\S]*?(?:res\.json|return)/i.test(cleanCode);
 
-      const hasTenantCheck = /tenant_id|tenantId|req\.user\.id|userId/i.test(diffOrCommand);
+      const hasTenantCheck = /tenant_id|tenantId|req\.user\.id|userId/i.test(cleanCode);
 
       if (hasIdor && !hasTenantCheck) {
         findings.push({
@@ -86,9 +87,9 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
 
       // 4. Shell / Command Injection Detection
       const hasShellInjection =
-        /(?:child_process|exec|spawn)\s*\(|exec\s*\(\s*`[^`]*\${/i.test(diffOrCommand) ||
-        /exec\s*\(\s*['"`][^'"`]*?\+/i.test(diffOrCommand) ||
-        /\beval\s*\(/i.test(diffOrCommand);
+        /(?:child_process|exec|spawn)\s*\(|exec\s*\(\s*`[^`]*\${/i.test(cleanCode) ||
+        /exec\s*\(\s*['"`][^'"`]*?\+/i.test(cleanCode) ||
+        /\beval\s*\(/i.test(cleanCode);
 
       if (hasShellInjection) {
         findings.push({
@@ -108,9 +109,9 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
 
       // 5. Privilege Escalation Detection
       const hasPrivEscalation =
-        /\b(?:role|isAdmin|permissions)\s*:\s*req\.body/i.test(diffOrCommand) ||
-        /\{\s*\.\.\.req\.body\s*\}[\s\S]*?(?:User\.update|db\.users\.update|update)/i.test(diffOrCommand) ||
-        /x-admin-override/i.test(diffOrCommand);
+        /\b(?:role|isAdmin|permissions)\s*:\s*req\.body/i.test(cleanCode) ||
+        /\{\s*\.\.\.req\.body\s*\}[\s\S]*?(?:User\.update|db\.users\.update|update)/i.test(cleanCode) ||
+        /x-admin-override/i.test(cleanCode);
 
       if (hasPrivEscalation) {
         findings.push({
@@ -129,9 +130,9 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
 
       // 6. Token Tampering / Weak Secret Detection
       const hasTokenTampering =
-        /jwt\.verify\s*\([^,]+,\s*['"`](?:secret|default|password|123456)['"`]/i.test(diffOrCommand) ||
-        /ignoreExpiration\s*:\s*true/i.test(diffOrCommand) ||
-        /algorithms\s*:\s*\[['"`]none['"`]\]/i.test(diffOrCommand);
+        /jwt\.verify\s*\([^,]+,\s*['"`](?:secret|default|password|123456)['"`]/i.test(cleanCode) ||
+        /ignoreExpiration\s*:\s*true/i.test(cleanCode) ||
+        /algorithms\s*:\s*\[['"`]none['"`]\]/i.test(cleanCode);
 
       if (hasTokenTampering) {
         findings.push({
@@ -153,3 +154,4 @@ export function createHackerPersona(id = 'hacker-01'): AdversarialPersona {
     }
   };
 }
+

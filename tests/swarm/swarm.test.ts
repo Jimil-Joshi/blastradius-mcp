@@ -5,6 +5,7 @@ import {
   createConfusedUserPersona,
   createLegacySystemPersona,
   createConcurrencyRacerPersona,
+  createDataCorruptorPersona,
   generatePersonas
 } from '../../src/swarm/personas/index.js';
 import {
@@ -218,6 +219,79 @@ test('ConcurrencyRacerPersona - detects simultaneous token refresh, TOCTOU, and 
   assert.ok(sharedStateFindings.some((f: PersonaFinding) => f.attackVector === 'UNSYNCHRONIZED_SHARED_STATE'));
 });
 
+test('DataCorruptorPersona - detects null byte poisoning, type confusion, and numeric singularities', async () => {
+  const corruptor = createDataCorruptorPersona();
+  assert.strictEqual(corruptor.type, 'DATA_CORRUPTOR');
+  assert.strictEqual(corruptor.focusArea, 'DATA_INTEGRITY');
+
+  // Test poison null byte injection
+  const nullByteDiff = `
+  function loadFile(req, res) {
+    const filePath = path.join('/var/data', req.params.filename);
+    const content = fs.readFileSync(filePath, 'utf8');
+    return res.send(content);
+  }
+  `;
+  const nullByteFindings = await corruptor.evaluate(nullByteDiff);
+  assert.ok(nullByteFindings.some((f: PersonaFinding) => f.attackVector === 'NULL_BYTE_POISONING'));
+
+  // Test type confusion / NoSQL object injection
+  const typeConfusionDiff = `
+  async function findAccount(req, res) {
+    const account = await Account.findOne({ username: req.body.username });
+    return res.json(account);
+  }
+  `;
+  const typeFindings = await corruptor.evaluate(typeConfusionDiff);
+  assert.ok(typeFindings.some((f: PersonaFinding) => f.attackVector === 'TYPE_CONFUSION_INJECTION'));
+
+  // Test numeric singularity / unchecked NaN parsing
+  const nanDiff = `
+  function parseLimit(req) {
+    const limit = parseInt(req.query.limit);
+    return limit * 10;
+  }
+  `;
+  const nanFindings = await corruptor.evaluate(nanDiff);
+  assert.ok(nanFindings.some((f: PersonaFinding) => f.attackVector === 'NUMERIC_SINGULARITY_NAN'));
+});
+
+test('False positive resilience - anchored property access, scoped boundary checks, and compound isolation', async () => {
+  const confused = createConfusedUserPersona();
+
+  // process.env.NODE_ENV.toLowerCase() should NOT be flagged as unhandled undefined
+  const benignDeep = `
+  function getEnv() {
+    return process.env.NODE_ENV.toLowerCase();
+  }
+  `;
+  const deepFindings = await confused.evaluate(benignDeep);
+  assert.strictEqual(deepFindings.filter((f: PersonaFinding) => f.attackVector === 'UNHANDLED_UNDEFINED').length, 0);
+
+  // fileTransfer should NOT trigger boundary violation
+  const benignTransfer = `
+  function fileTransfer(filename, targetFolder) {
+    return path.join(targetFolder, filename);
+  }
+  `;
+  const boundaryFindings = await confused.evaluate(benignTransfer);
+  assert.strictEqual(boundaryFindings.filter((f: PersonaFinding) => f.attackVector === 'BOUNDARY_VIOLATION').length, 0);
+
+  // Token refresh race alone should NOT trigger COMPOUND_AUTH_RACE
+  const engine = new SwarmNativeEngine();
+  const tokenOnlyDiff = `
+  async function refresh(oldToken) {
+    const s = await db.sessions.find(oldToken);
+    await db.sessions.delete(oldToken);
+    const n = generateToken();
+    await db.sessions.save(n);
+    return n;
+  }
+  `;
+  const simRes = await engine.simulate({ targetDiffOrCommand: tokenOnlyDiff, agentCount: 25 });
+  assert.strictEqual(simRes.criticalFindings.filter((f: PersonaFinding) => f.attackVector === 'COMPOUND_AUTH_RACE').length, 0);
+});
+
 test('generatePersonas - generates requested count and handles focus areas', () => {
   const personas25 = generatePersonas(25);
   assert.strictEqual(personas25.length, 25);
@@ -227,6 +301,7 @@ test('generatePersonas - generates requested count and handles focus areas', () 
   assert.ok(types.has('CONFUSED_USER'));
   assert.ok(types.has('LEGACY_SYSTEM'));
   assert.ok(types.has('CONCURRENCY_RACER'));
+  assert.ok(types.has('DATA_CORRUPTOR'));
 
   const personas50 = generatePersonas(50);
   assert.strictEqual(personas50.length, 50);
@@ -476,3 +551,4 @@ test('SwarmNativeEngine - computes PR Risk Score and respects verdict thresholds
   assert.ok(blockResult.prRiskScore >= 70, `Expected score >= 70, got ${blockResult.prRiskScore}`);
   assert.strictEqual(blockResult.verdict, 'BLOCK');
 });
+
