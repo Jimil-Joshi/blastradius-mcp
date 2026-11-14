@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/Jimil-Joshi/blastradius-mcp/blob/main/SECURITY.md
+    about: Please report security vulnerabilities privately according to our security policy.
+  - name: Documentation & Audit Reports
+    url: https://github.com/Jimil-Joshi/blastradius-mcp/blob/main/docs/OPENSOURCE_AUDIT_REPORT.md
+    about: Read our real-world open-source audit methodology and results.
