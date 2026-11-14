@@ -18,8 +18,6 @@ phones nothing home, no license key and no paid tier.
 [![node](https://img.shields.io/badge/node-%3E%3D22-5FA04E.svg?style=flat-square)](https://nodejs.org)
 [![types](https://img.shields.io/badge/TypeScript-strict-3178C6.svg?style=flat-square)](tsconfig.json)
 
-> 📖 **Executive & Investor Briefing**: See [PRODUCT_EXPLAINER.md](PRODUCT_EXPLAINER.md) for the 30-second elevator pitch, business moats, and enterprise buyer breakdown.
-
 ---
 
 ## The problem
