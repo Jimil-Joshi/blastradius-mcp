@@ -26,6 +26,9 @@
     "test": "node --test dist/tests/**/*.test.js",
     "test:src": "npm run build && node --test dist/tests/**/*.test.js",
     "pretest": "npm run build",
+    "test:pillars": "npm run build && node dist/tests/pillars_evaluation.js",
+    "test:opensource": "npm run build && node dist/tests/opensource_tools_benchmark.js",
+    "test:real-audit": "npm run build && node dist/tests/real_oss_audit.js",
     "bundle": "npm run build && npm prune --omit=dev && npx --yes @anthropic-ai/mcpb@2.1.2 pack . blastradius-mcp.mcpb"
   },
   "keywords": [
