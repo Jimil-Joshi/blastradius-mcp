@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { SemanticRouter } from '../src/gateway/semanticRouter.js';
 import { ContextVirtualizer } from '../src/gateway/contextVirtualizer.js';
 import { SwarmNativeEngine } from '../src/swarm/nativeEngine.js';
@@ -109,7 +110,7 @@ async function runEvaluation() {
   for (let i = 0; i < 500; i++) {
     rows.push({
       id: i,
-      uuid: `usr_981a_${i}_${Math.random().toString(36).substring(7)}`,
+      uuid: `usr_981a_${i}_${randomBytes(6).toString('hex')}`,
       email: `user_${i}@enterprise-corp.internal`,
       accountBalance: 15420.50 + i,
       role: i % 5 === 0 ? 'admin' : 'viewer',
