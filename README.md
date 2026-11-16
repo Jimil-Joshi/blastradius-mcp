@@ -12,11 +12,22 @@ phones nothing home, no license key and no paid tier.
 
 [![npm](https://img.shields.io/npm/v/blastradius-mcp.svg?style=flat-square)](https://www.npmjs.com/package/blastradius-mcp)
 [![tests](https://img.shields.io/badge/tests-237%2F237%20passing-brightgreen.svg?style=flat-square)](https://github.com/Jimil-Joshi/blastradius-mcp/actions/workflows/ci.yml)
-[![ci](https://github.com/Jimil-Joshi/blastradius-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Jimil-Joshi/blastradius-mcp/actions/workflows/ci.yml)
-[![codeql](https://github.com/Jimil-Joshi/blastradius-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/Jimil-Joshi/blastradius-mcp/actions/workflows/codeql.yml)
+[![GuardFall](https://img.shields.io/badge/GuardFall-23%2F23%20blocked-success.svg?style=flat-square)](https://github.com/Jimil-Joshi/blastradius-mcp#and-the-second-problem-matching-the-text-is-not-the-same-as-matching-the-command)
+[![Context Reduction](https://img.shields.io/badge/Token%20Reduction-99.4%25-orange.svg?style=flat-square)](https://github.com/Jimil-Joshi/blastradius-mcp#pillar-1-zero-bloat-gateway)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square)](LICENSE)
 [![node](https://img.shields.io/badge/node-%3E%3D22-5FA04E.svg?style=flat-square)](https://nodejs.org)
 [![types](https://img.shields.io/badge/TypeScript-strict-3178C6.svg?style=flat-square)](tsconfig.json)
+
+> ⭐️ **Support Open-Source Agent Safety**: If you believe autonomous coding agents need pre-flight safety before touching production code, please **star this repository**! It helps the project grow and protects the developer commons.
+
+```bash
+# Run immediately with zero install (Node 22+):
+npx -y blastradius-mcp
+```
+
+<p align="center">
+  <img src="assets/demo.gif" alt="BlastRadius-Zero Demo" width="780" />
+</p>
 
 ---
 
