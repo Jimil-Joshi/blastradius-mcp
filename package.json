@@ -1,7 +1,7 @@
 {
   "name": "blastradius-mcp",
   "version": "2.0.0",
-  "description": "Zero-trust security proxy for MCP: pre-execution blast radius simulation, DLP redaction, step-up approval tokens, and a hash-chained audit ledger.",
+  "description": "Pre-flight safety runtime & zero-bloat MCP gateway for AI coding agents. Resolves shell commands before matching (catches all 23 GuardFall bypass classes), DLP redaction, 50-persona swarm simulator, TDD enforcer, HMAC audit ledger, step-up tokens. Works with Cursor, Claude Code, Cline, and VS Code. Zero cloud, zero cost. Apache-2.0.",
   "type": "module",
   "main": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
