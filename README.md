@@ -1,4 +1,4 @@
-# BlastRadius-Zero (v2.0)
+# BlastRadius-MCP (v2.0)
 
 **The Pre-Flight Safety Runtime & Zero-Bloat Gateway for AI Agents.** It unleashes
 an in-memory swarm of 50 adversarial virtual personas to stress-test agent code and PRs
@@ -6,6 +6,8 @@ in <50ms *before* merge, slashes agent context memory by **99%** via JIT semanti
 enforces strict Test-Driven Development (TDD), resolves shell commands the way the kernel will,
 redacts credentials flowing in either direction, and leaves a tamper-evident audit trail backed
 by a local SQLite learning flywheel.
+
+> 🛡️ **Disambiguation Notice**: **BlastRadius-MCP** is an open-source pre-flight safety runtime and zero-bloat gateway for AI coding agents using the Model Context Protocol (MCP) — not a cloud infrastructure or IaC change auditor.
 
 Apache-2.0. Built on Node 22+ (native `node:sqlite`). Runs locally, opens no sockets,
 phones nothing home, no license key and no paid tier.
@@ -26,7 +28,7 @@ npx -y blastradius-mcp
 ```
 
 <p align="center">
-  <img src="assets/demo.gif" alt="BlastRadius-Zero Demo" width="780" />
+  <img src="assets/demo.gif" alt="BlastRadius-MCP Demo" width="780" />
 </p>
 
 ---
@@ -270,9 +272,9 @@ action.
 
 ---
 
-## The 12 MCP Tools (BlastRadius-Zero)
+## The 12 MCP Tools (BlastRadius-MCP)
 
-BlastRadius-Zero exposes 12 high-impact tools across 4 operational pillars:
+The BlastRadius-MCP tool exposes 12 high-impact tools across 4 operational pillars:
 
 ### Pillar 1: Zero-Bloat Gateway (Context Optimization)
 | Tool | What it does |
@@ -670,7 +672,7 @@ The build is `tsc` under `strict: true`. No external bundler, no framework depen
 
 ### The 10 Pre-Flight Verification Gates (`validate-blastradius-zero.mjs`)
 
-BlastRadius-Zero is validated self-referentially before release across 10 operational gates:
+The BlastRadius-MCP tool is validated self-referentially before release across 10 operational gates:
 
 ```bash
 node scripts/validate-blastradius-zero.mjs
@@ -678,7 +680,7 @@ node scripts/validate-blastradius-zero.mjs
 
 ```
 ================================================================================
-🚀 VALIDATING BLASTRADIUS-ZERO v2.0 USING BLASTRADIUS-ZERO ITSELF
+🚀 VALIDATING BLASTRADIUS-MCP v2.0 USING BLASTRADIUS-MCP ITSELF
 ================================================================================
 [1/10] Verifying MCP Tool Discovery: 12 tools registered and advertising schemas...  ✓ PASSED
 [2/10] Running simulate_swarm_impact (50 Personas in <50ms) on code diff...          ✓ PASSED
@@ -691,7 +693,7 @@ node scripts/validate-blastradius-zero.mjs
 [9/10] Testing automated_code_critique (AST scan: swallowed catches & unindexed DB)  ✓ PASSED
 [10/10] Fetching get_security_posture & Native SQLite Data Flywheel telemetry...      ✓ PASSED
 ================================================================================
-🎉 ALL 10 BLASTRADIUS-ZERO VERIFICATION GATES PASSED CLEANLY!
+🎉 ALL 10 BLASTRADIUS-MCP VERIFICATION GATES PASSED CLEANLY!
 ================================================================================
 ```
 
@@ -711,7 +713,7 @@ Seven standalone diagnostic probe scripts are provided in `scripts/` to audit sp
 
 ### Empirical Validation & 4-Pillar Proofs
 
-Every product claim of BlastRadius-Zero (v2.0) is backed by direct, measurable, reproducible empirical benchmarks:
+Every product claim of BlastRadius-MCP (v2.0) is backed by direct, measurable, reproducible empirical benchmarks:
 
 ```bash
 npm run test:pillars
@@ -726,7 +728,7 @@ npm run test:pillars
 
 ### Live Validation on 10+ Major Open-Source MCP Servers
 
-To prove cross-ecosystem effectiveness, BlastRadius-Zero was tested across **10 major open-source MCP toolsets** (83 tools total): Filesystem, GitHub, PostgreSQL, Docker, Kubernetes, AWS S3, Puppeteer, Redis, Slack, and Naukri-MCP:
+To prove cross-ecosystem effectiveness, the BlastRadius-MCP tool was tested across **10 major open-source MCP toolsets** (83 tools total): Filesystem, GitHub, PostgreSQL, Docker, Kubernetes, AWS S3, Puppeteer, Redis, Slack, and Naukri-MCP:
 
 ```bash
 npm run test:opensource
@@ -742,7 +744,7 @@ npm run test:opensource
 
 ### Live Codebase Audit on 12 Viral Open-Source Repositories (400,000+ Stars)
 
-To prove that BlastRadius-Zero identifies real issues in production codebases without relying on synthetic fixtures, we audited **12 massive open-source repositories** (**Express, Fastify, Axios, Commander, Dotenv, Winston, Socket.io, Mongoose, Mocha, Anthropic MCP-Servers, Chalk, and Naukri-MCP**):
+To prove that the BlastRadius-MCP tool identifies real issues in production codebases without relying on synthetic fixtures, we audited **12 massive open-source repositories** (**Express, Fastify, Axios, Commander, Dotenv, Winston, Socket.io, Mongoose, Mocha, Anthropic MCP-Servers, Chalk, and Naukri-MCP**):
 
 ```bash
 npm run test:real-audit
@@ -754,23 +756,6 @@ npm run test:real-audit
   * **30 Dangerous Shell Execution Sinks:** Flagged unconstrained `child_process.spawn()` / `exec()` invocations across `dotenv`, `winston`, `mocha`, `mongoose`, and `mcp-servers`.
   * **Deep Unchecked Input Access:** Flagged unvalidated `req.body` / `req.params` access prone to TypeError crashes in `express/examples/auth/index.js`.
 * 📄 Full file-by-file audit report with exact line numbers is available in [OPENSOURCE_AUDIT_REPORT.md](docs/OPENSOURCE_AUDIT_REPORT.md).
-
-### Self-Validation with BlastRadius-Zero
-
-To run the end-to-end self-validation where BlastRadius-Zero verifies itself across all 10 operational gates:
-
-```bash
-node scripts/validate-blastradius-zero.mjs
-```
-
-Four diagnostic probes are also kept in `scripts/`:
-
-```bash
-node scripts/probe-guardfall.mjs        # 23 bypass classes, one line each
-node scripts/probe-false-positives.mjs  # 39 routine commands that must not trip
-node scripts/probe-sequence.mjs        # workflow patterns firing, and staying quiet
-node scripts/validate-blastradius-zero.mjs # 10 full pre-flight verification gates
-```
 
 ---
 
